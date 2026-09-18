@@ -26,6 +26,12 @@ function currentPath() {
   return ROUTES[path] ? path : "/";
 }
 
+/* La barra superior reserva el ancho de la barra de scroll para alinearse con las tarjetas */
+function syncScrollGutter() {
+  const gutter = contentHost.offsetWidth - contentHost.clientWidth;
+  document.documentElement.style.setProperty("--scroll-gutter", `${gutter}px`);
+}
+
 function renderRoute() {
   const path = currentPath();
   const route = ROUTES[path];
@@ -36,6 +42,7 @@ function renderRoute() {
   contentHost.scrollTop = 0;
   navLinks.forEach((link, key) => link.classList.toggle("is-active", key === path));
   document.body.classList.remove("nav-open");
+  syncScrollGutter();
 }
 
 function sidebar() {
@@ -157,5 +164,6 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") document.body.classList.remove("nav-open");
 });
 
+window.addEventListener("resize", syncScrollGutter);
 window.addEventListener("hashchange", renderRoute);
 renderRoute();

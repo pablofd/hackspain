@@ -347,7 +347,7 @@ textarea {
   align-items: center;
   gap: var(--sp-4);
   flex: none;
-  padding: var(--sp-5) var(--sp-6) var(--sp-4);
+  padding: var(--sp-5) calc(var(--sp-6) + var(--scroll-gutter, 0px)) var(--sp-4) var(--sp-6);
 }
 
 .topbar__titles {
@@ -2072,7 +2072,7 @@ table.data .cell-sub {
 
   .topbar {
     flex-wrap: wrap;
-    padding: var(--sp-3) var(--sp-4) var(--sp-4);
+    padding: var(--sp-3) calc(var(--sp-4) + var(--scroll-gutter, 0px)) var(--sp-4) var(--sp-4);
   }
 
   .topbar__actions {
