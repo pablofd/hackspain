@@ -675,6 +675,18 @@ textarea {
   color: var(--text-secondary);
 }
 
+.pill--link {
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast);
+}
+
+.pill--link:hover {
+  background: var(--white);
+  border-color: var(--pitch-black);
+  color: var(--pitch-black);
+}
+
 .dot {
   width: 6px;
   height: 6px;

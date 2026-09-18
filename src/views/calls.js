@@ -11,14 +11,21 @@ export const meta = {
 
 const FILTERS = [
   { id: "all", label: "Todas" },
+  { id: "live", label: "En directo" },
   { id: "resolved", label: "Resueltas" },
   { id: "escalated", label: "Escaladas" },
   { id: "pending", label: "Pendientes" },
 ];
 
-export function render() {
-  let filter = "all";
-  let selected = calls[0];
+const matches = (c, filter) => {
+  if (filter === "all") return true;
+  if (filter === "live") return Boolean(c.live);
+  return c.outcome === filter;
+};
+
+export function render(param) {
+  let filter = param === "directo" ? "live" : "all";
+  let selected = filter === "live" ? calls.find((c) => c.live) || calls[0] : calls[0];
   let signalsOpen = false;
   let mapOpen = false;
 
@@ -27,7 +34,7 @@ export function render() {
   const tbody = el("tbody", {});
 
   function renderRows() {
-    const rows = calls.filter((c) => filter === "all" || c.outcome === filter);
+    const rows = calls.filter((c) => matches(c, filter));
     mount(
       tbody,
       ...rows.map((c) =>
@@ -215,7 +222,7 @@ export function render() {
 }
 
 function chatCard(c, signalsOpen, onToggle) {
-  const isLive = c.outcome === "pending";
+  const isLive = Boolean(c.live);
   return el(
     "section",
     { class: "chat-card grain" },
@@ -341,7 +348,7 @@ export function signalsPanel(c) {
     .filter((k) => k.id !== c.id && (k.reason === c.reason || k.sentiment === c.sentiment))
     .slice(0, 3);
 
-  const isLive = c.outcome === "pending";
+  const isLive = Boolean(c.live);
   const liveNumber = el(
     "span",
     { class: "mono" },

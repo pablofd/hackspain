@@ -21,9 +21,11 @@ const titleNode = el("h1", { class: "topbar__title" });
 const subNode = el("p", { class: "topbar__sub" });
 const navLinks = new Map();
 
-function currentPath() {
-  const path = location.hash.replace(/^#/, "") || "/";
-  return ROUTES[path] ? path : "/";
+/* El hash admite una subruta opcional: #/llamadas/directo */
+function currentRoute() {
+  const [, segment = "", param = ""] = location.hash.replace(/^#/, "").split("/");
+  const path = `/${segment}`;
+  return ROUTES[path] ? { path, param } : { path: "/", param: "" };
 }
 
 /* La barra superior reserva el ancho de la barra de scroll para alinearse con las tarjetas */
@@ -33,12 +35,12 @@ function syncScrollGutter() {
 }
 
 function renderRoute() {
-  const path = currentPath();
+  const { path, param } = currentRoute();
   const route = ROUTES[path];
   titleNode.textContent = route.view.meta.title;
   subNode.textContent = route.view.meta.sub;
   document.title = `${route.view.meta.title} · maio`;
-  mount(contentHost, route.view.render());
+  mount(contentHost, route.view.render(param));
   contentHost.scrollTop = 0;
   navLinks.forEach((link, key) => link.classList.toggle("is-active", key === path));
   document.body.classList.remove("nav-open");
@@ -86,7 +88,12 @@ function sidebar() {
       el(
         "div",
         { class: "row" },
-        el("span", { class: "pill pill--ok" }, el("span", { class: "dot dot--pulse" }), "En directo"),
+      el(
+        "a",
+        { class: "pill pill--ok pill--link", href: "#/llamadas/directo" },
+        el("span", { class: "dot dot--pulse" }),
+        "En directo",
+      ),
         el("button", { class: "btn btn--sm btn--ghost ml-auto" }, "Pausar"),
       ),
     ),
@@ -115,20 +122,6 @@ function topbar() {
     }
   });
 
-  const fullscreenBtn = el(
-    "button",
-    {
-      class: "btn btn--icon btn--ghost",
-      title: "Pantalla completa (F)",
-      onclick: toggleFullscreen,
-    },
-    icon("expand", "nav__icon"),
-  );
-
-  document.addEventListener("fullscreenchange", () => {
-    mount(fullscreenBtn, icon(document.fullscreenElement ? "collapse" : "expand", "nav__icon"));
-  });
-
   return el(
     "header",
     { class: "topbar" },
@@ -147,7 +140,6 @@ function topbar() {
       "div",
       { class: "topbar__actions" },
       search,
-      fullscreenBtn,
       el("button", { class: "btn btn--icon btn--ghost", title: "Notificaciones" }, icon("bell", "nav__icon")),
     ),
   );

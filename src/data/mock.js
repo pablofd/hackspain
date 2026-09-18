@@ -60,6 +60,43 @@ CUANDO NO SEPAS ALGO
 
 export const calls = [
   {
+    id: "CL-40923",
+    caller: "Lucía Benet",
+    phone: "+34 629 340 118",
+    reason: "Cita cardiología",
+    outcome: "pending",
+    sentiment: "neutral",
+    duration: "1m 12s",
+    time: "Ahora",
+    direction: "Entrante",
+    live: true,
+    actions: ["Identidad verificada", "Consultando agenda del Dr. Ferrer"],
+    transcript: [
+      ["caller", "Buenos días, querría pedir cita con cardiología."],
+      ["agent", "Buenos días. ¿Me confirma su nombre completo y fecha de nacimiento?"],
+      ["caller", "Lucía Benet, 14 de marzo del 78."],
+      ["agent", "Gracias, Lucía. Estoy mirando los primeros huecos disponibles."],
+    ],
+  },
+  {
+    id: "CL-40922",
+    caller: "Tomás Aguilar",
+    phone: "+34 612 887 043",
+    reason: "Dolor abdominal",
+    outcome: "pending",
+    sentiment: "negative",
+    duration: "0m 47s",
+    time: "Ahora",
+    direction: "Entrante",
+    live: true,
+    actions: ["Triaje en curso"],
+    transcript: [
+      ["caller", "Llevo desde anoche con un dolor fuerte en el costado derecho."],
+      ["agent", "Entiendo. ¿Tiene fiebre o náuseas en este momento?"],
+      ["caller", "Sí, he vomitado dos veces."],
+    ],
+  },
+  {
     id: "CL-40921",
     caller: "María Gómez",
     phone: "+34 611 204 883",
