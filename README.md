@@ -28,11 +28,15 @@ python3 -m http.server 4321
 
 | Nombre | Hex | Uso |
 | --- | --- | --- |
+| White | `#FFFFFF` | Fondo de la plataforma y superficies |
 | Charcoal | `#565656` | Texto secundario y bordes |
 | Light Green | `#B2FFA9` | Acento principal, estados activos |
 | Blazing Flame | `#FF4A1C` | Urgencias y acciones críticas |
 | Coffee Bean | `#81523F` | Superficies cálidas elevadas |
-| Deep Mocha | `#3F2A2B` | Fondo base |
+| Deep Mocha | `#3F2A2B` | Texto oscuro, avatares y sombras |
+
+Sobre blanco se usan dos sombras derivadas para asegurar contraste de texto:
+`--green-deep: #1F5C22` y `--flame-deep: #C9350F`.
 
 ## Conectar agentes reales
 

@@ -3,6 +3,13 @@
   "version": "1.0.0",
   "colors": [
     {
+      "token": "white",
+      "name": "White",
+      "hex": "#FFFFFF",
+      "rgb": [255, 255, 255],
+      "role": "Fondo de la plataforma y superficies de tarjeta"
+    },
+    {
       "token": "charcoal",
       "name": "Charcoal",
       "hex": "#565656",
@@ -35,7 +42,21 @@
       "name": "Deep Mocha",
       "hex": "#3F2A2B",
       "rgb": [63, 42, 43],
-      "role": "Fondo base de la aplicación, sombras profundas"
+      "role": "Texto principal, avatares y sombras"
+    }
+  ],
+  "derived": [
+    {
+      "token": "green-deep",
+      "hex": "#1F5C22",
+      "from": "light-green",
+      "role": "Texto y trazos verdes legibles sobre blanco"
+    },
+    {
+      "token": "flame-deep",
+      "hex": "#C9350F",
+      "from": "blazing-flame",
+      "role": "Texto y trazos de alerta legibles sobre blanco"
     }
   ]
 }

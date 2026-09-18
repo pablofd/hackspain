@@ -416,7 +416,7 @@ export const volumeByHour = [
 export const reasonsBreakdown = [
   { label: "Agendar cita", value: 38, color: "var(--light-green)" },
   { label: "Reprogramar", value: 21, color: "var(--coffee-bean)" },
-  { label: "Resultados", value: 16, color: "#e0bda9" },
+  { label: "Resultados", value: 16, color: "var(--green-deep)" },
   { label: "Triaje clínico", value: 14, color: "var(--blazing-flame)" },
   { label: "Facturación", value: 11, color: "var(--charcoal)" },
 ];

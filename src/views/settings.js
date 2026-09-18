@@ -7,11 +7,12 @@ export const meta = {
 };
 
 const PALETTE = [
+  ["White", "#FFFFFF", "Fondo de la plataforma"],
   ["Charcoal", "#565656", "Texto secundario y bordes"],
   ["Light Green", "#B2FFA9", "Acento principal y estados activos"],
   ["Blazing Flame", "#FF4A1C", "Urgencias y acciones críticas"],
   ["Coffee Bean", "#81523F", "Superficies cálidas elevadas"],
-  ["Deep Mocha", "#3F2A2B", "Fondo base"],
+  ["Deep Mocha", "#3F2A2B", "Texto oscuro y avatares"],
 ];
 
 export function render() {
