@@ -414,11 +414,11 @@ export const volumeByHour = [
 ];
 
 export const reasonsBreakdown = [
-  { label: "Agendar cita", value: 38, color: "var(--ink-black)" },
-  { label: "Reprogramar", value: 21, color: "var(--gray-600)" },
-  { label: "Resultados", value: 16, color: "var(--gray-400)" },
-  { label: "Triaje clínico", value: 14, color: "var(--gray-300)" },
-  { label: "Facturación", value: 11, color: "var(--gray-200)" },
+  { label: "Agendar cita", value: 38, color: "var(--pitch-black)" },
+  { label: "Reprogramar", value: 21, color: "var(--dusty-denim)" },
+  { label: "Resultados", value: 16, color: "var(--blue-slate)" },
+  { label: "Triaje clínico", value: 14, color: "var(--lipstick-red)" },
+  { label: "Facturación", value: 11, color: "rgba(100, 110, 120, 0.32)" },
 ];
 
 export const weeklyTrend = [

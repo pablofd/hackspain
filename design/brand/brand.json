@@ -13,16 +13,18 @@
     "usos": ["app", "favicon", "avatar del agente", "burbuja de voz"],
     "file": "design/brand/maio-icon.svg",
     "variantes": [
-      { "id": "tinta-negra", "fondo": "#0D1B1E", "simbolo": "#F5F2ED" },
-      { "id": "fondo-claro", "fondo": "#EFEFEF", "simbolo": "#0D1B1E" },
-      { "id": "contorno", "fondo": "transparente", "simbolo": "#0D1B1E" }
+      { "id": "tinta-negra", "fondo": "#12100E", "simbolo": "#F6F0ED" },
+      { "id": "fondo-claro", "fondo": "#F6F0ED", "simbolo": "#12100E" },
+      { "id": "contorno", "fondo": "transparente", "simbolo": "#12100E" }
     ],
     "areaDeRespeto": "Igual a la altura de la onda interior por cada lado"
   },
   "colores": {
-    "tinta": "#0D1B1E",
-    "papel": "#F5F2ED",
-    "platino": "#EFEFEF",
+    "tinta": "#12100E",
+    "papel": "#F6F0ED",
+    "denim": "#748CAB",
+    "pizarra": "#646E78",
+    "rojo": "#EC0B43",
     "blanco": "#FFFFFF"
   },
   "tipografia": {

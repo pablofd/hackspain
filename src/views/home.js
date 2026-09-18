@@ -96,8 +96,8 @@ export function render() {
         { title: "Automatizado vs. humano", sub: "Porcentaje de llamadas por día de la semana" },
         stackedBars(weeklyTrend),
         legend([
-          { label: "Resuelto por agente", color: "var(--ink-black)" },
-          { label: "Escalado a humano", color: "var(--gray-300)" },
+          { label: "Resuelto por agente", color: "var(--pitch-black)" },
+          { label: "Escalado a humano", color: "var(--dusty-denim)" },
         ]),
       ),
       card(

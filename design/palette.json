@@ -1,40 +1,60 @@
 {
-  "name": "Aurea Health — Core Palette",
-  "version": "3.0.0",
-  "mode": "monocromo",
+  "name": "maio — Core Palette",
+  "version": "4.0.0",
+  "base": "Interfaz blanca; el color entra con moderación",
   "colors": [
     {
-      "token": "ink-black",
-      "name": "Ink Black",
-      "hex": "#0D1B1E",
-      "rgb": [13, 27, 30],
-      "role": "Texto, acento principal, botones sólidos, gráficos y avatares"
+      "token": "pitch-black",
+      "name": "Pitch Black",
+      "hex": "#12100E",
+      "rgb": [18, 16, 14],
+      "role": "Texto, marca, botones primarios, serie principal de gráficos"
     },
     {
-      "token": "platinum",
-      "name": "Platinum",
-      "hex": "#EFEFEF",
-      "rgb": [239, 239, 239],
-      "role": "Base de la interfaz junto al blanco"
+      "token": "parchment",
+      "name": "Parchment",
+      "hex": "#F6F0ED",
+      "rgb": [246, 240, 237],
+      "role": "Superficies suaves: hover, tarjetas tintadas, burbujas del paciente"
+    },
+    {
+      "token": "dusty-denim",
+      "name": "Dusty Denim",
+      "hex": "#748CAB",
+      "rgb": [116, 140, 171],
+      "role": "Acento de datos: series secundarias, sparklines, avatares de paciente"
+    },
+    {
+      "token": "blue-slate",
+      "name": "Blue Slate",
+      "hex": "#646E78",
+      "rgb": [100, 110, 120],
+      "role": "Texto secundario y etiquetas"
+    },
+    {
+      "token": "lipstick-red",
+      "name": "Lipstick Red",
+      "hex": "#EC0B43",
+      "rgb": [236, 11, 67],
+      "role": "Solo crítico: escalados, riesgo alto, badge de cola y tendencias negativas"
     },
     {
       "token": "white",
       "name": "White",
       "hex": "#FFFFFF",
       "rgb": [255, 255, 255],
-      "role": "Superficies de tarjeta y paneles de vidrio"
+      "role": "Fondo de la plataforma y superficies de tarjeta"
     }
   ],
-  "grays": [
-    { "token": "gray-800", "hex": "#232C2F", "role": "Degradados de botones y avatares" },
-    { "token": "gray-600", "hex": "#4F5759", "role": "Series secundarias en gráficos" },
-    { "token": "gray-400", "hex": "#8B9294", "role": "Series terciarias, estados correctos" },
-    { "token": "gray-300", "hex": "#B7BCBD", "role": "Barras neutras y puntos de línea de tiempo" },
-    { "token": "gray-200", "hex": "#D9DCDC", "role": "Series de menor peso" }
-  ],
+  "forma": {
+    "radios": "0 px en todos los contenedores y controles",
+    "bordes": "Hairline de 1 px rgba(18,16,14,0.12)",
+    "sombras": "Mínimas; la jerarquía la marcan las líneas"
+  },
   "reserved": [
-    { "token": "dusty-mauve", "hex": "#A54657", "note": "Fuera de uso: la interfaz es monocroma" },
-    { "token": "tropical-teal", "hex": "#48A9A6", "note": "Fuera de uso: la interfaz es monocroma" },
-    { "token": "coral-glow", "hex": "#FF8552", "note": "Fuera de uso: la interfaz es monocroma" }
+    { "token": "ink-black", "hex": "#0D1B1E", "note": "Paleta anterior" },
+    { "token": "dusty-mauve", "hex": "#A54657", "note": "Paleta anterior" },
+    { "token": "tropical-teal", "hex": "#48A9A6", "note": "Paleta anterior" },
+    { "token": "coral-glow", "hex": "#FF8552", "note": "Paleta anterior" }
   ]
 }

@@ -1,79 +1,80 @@
 /* ============================================================
-   Aurea Health · Design tokens
-   Paleta canónica: /design/palette.json
+   maio · Design tokens
+   Paleta canónica: /design/palette.json · Marca: /design/brand
    ============================================================ */
 
 :root {
-  /* --- Paleta base · monocroma --------------------------- */
-  --ink-black: #0d1b1e;
-  --platinum: #efefef;
+  /* --- Paleta base --------------------------------------- */
+  --pitch-black: #12100e;
+  --parchment: #f6f0ed;
+  --dusty-denim: #748cab;
+  --blue-slate: #646e78;
+  --lipstick-red: #ec0b43;
   --white: #ffffff;
 
-  --ink-black-rgb: 13, 27, 30;
-  --platinum-rgb: 239, 239, 239;
+  --pitch-black-rgb: 18, 16, 14;
+  --parchment-rgb: 246, 240, 237;
+  --dusty-denim-rgb: 116, 140, 171;
+  --blue-slate-rgb: 100, 110, 120;
+  --lipstick-red-rgb: 236, 11, 67;
   --white-rgb: 255, 255, 255;
 
-  /* Escala de grises derivada del Ink Black */
-  --gray-800: #232c2f;
-  --gray-600: #4f5759;
-  --gray-400: #8b9294;
-  --gray-300: #b7bcbd;
-  --gray-200: #d9dcdc;
-
   /* --- Semántica ----------------------------------------- */
-  --bg-base: var(--platinum);
-  --bg-deep: var(--ink-black);
-  --accent: var(--ink-black);
-  --accent-rgb: var(--ink-black-rgb);
-  --accent-deep: var(--ink-black);
-  --ok: var(--gray-400);
-  --ok-rgb: var(--ink-black-rgb);
-  --ok-deep: var(--gray-600);
-  --alert: var(--ink-black);
-  --alert-rgb: var(--ink-black-rgb);
-  --alert-deep: var(--ink-black);
+  --bg-base: var(--white);
+  --bg-deep: var(--pitch-black);
+  --accent: var(--pitch-black);
+  --accent-rgb: var(--pitch-black-rgb);
+  --accent-deep: var(--pitch-black);
+  --highlight: var(--dusty-denim);
+  --highlight-rgb: var(--dusty-denim-rgb);
+  --ok: var(--blue-slate);
+  --ok-rgb: var(--blue-slate-rgb);
+  --ok-deep: var(--blue-slate);
+  --alert: var(--lipstick-red);
+  --alert-rgb: var(--lipstick-red-rgb);
+  --alert-deep: var(--lipstick-red);
 
-  --ink-rgb: var(--ink-black-rgb);
-  --text-primary: var(--ink-black);
-  --text-secondary: rgba(var(--ink-rgb), 0.66);
-  --text-muted: rgba(var(--ink-rgb), 0.45);
+  --ink-rgb: var(--pitch-black-rgb);
+  --text-primary: var(--pitch-black);
+  --text-secondary: var(--blue-slate);
+  --text-muted: rgba(var(--blue-slate-rgb), 0.72);
   --text-on-accent: #ffffff;
-  --text-on-dark: var(--white);
+  --text-on-dark: var(--parchment);
 
-  /* --- Superficies de vidrio ------------------------------ */
-  --glass-1: rgba(var(--white-rgb), 0.62);
-  --glass-2: rgba(var(--white-rgb), 0.88);
-  --glass-3: rgba(var(--ink-rgb), 0.05);
-  --glass-hover: rgba(var(--ink-rgb), 0.045);
-  --glass-warm: rgba(var(--accent-rgb), 0.06);
-  --stroke-soft: rgba(var(--ink-rgb), 0.1);
-  --stroke-strong: rgba(var(--ink-rgb), 0.18);
+  /* --- Superficies ---------------------------------------- */
+  --glass-1: rgba(var(--white-rgb), 0.7);
+  --glass-2: rgba(var(--white-rgb), 0.92);
+  --glass-3: var(--parchment);
+  --glass-hover: rgba(var(--parchment-rgb), 0.7);
+  --glass-warm: var(--parchment);
+  --stroke-soft: rgba(var(--ink-rgb), 0.12);
+  --stroke-strong: rgba(var(--ink-rgb), 0.24);
   --hairline: rgba(var(--ink-rgb), 0.08);
-  --blur-sm: saturate(150%) blur(14px);
-  --blur-md: saturate(160%) blur(28px);
-  --blur-lg: saturate(170%) blur(48px);
+  --blur-sm: saturate(140%) blur(14px);
+  --blur-md: saturate(150%) blur(24px);
+  --blur-lg: saturate(160%) blur(40px);
 
   /* --- Gráficos ------------------------------------------ */
   --chart-grid: rgba(var(--ink-rgb), 0.08);
-  --chart-label: rgba(var(--ink-rgb), 0.5);
-  --chart-track: rgba(var(--ink-rgb), 0.07);
+  --chart-label: var(--text-muted);
+  --chart-track: var(--parchment);
 
   /* --- Layout -------------------------------------------- */
-  --sidebar-w: 276px;
+  --sidebar-w: 268px;
 
-  /* --- Radios (estilo Apple, continuos y generosos) ------- */
-  --r-xs: 10px;
-  --r-sm: 14px;
-  --r-md: 20px;
-  --r-lg: 28px;
-  --r-xl: 36px;
-  --r-pill: 999px;
+  /* --- Radios · aristas vivas ---------------------------- */
+  --r-xs: 0px;
+  --r-sm: 0px;
+  --r-md: 0px;
+  --r-lg: 0px;
+  --r-xl: 0px;
+  --r-pill: 0px;
 
-  /* --- Sombras ------------------------------------------- */
-  --shadow-sm: 0 1px 2px rgba(var(--ink-rgb), 0.06), 0 2px 8px rgba(var(--ink-rgb), 0.05);
-  --shadow-md: 0 10px 30px rgba(var(--ink-rgb), 0.1);
-  --shadow-lg: 0 26px 70px rgba(var(--ink-rgb), 0.12);
-  --shadow-accent: 0 2px 8px rgba(var(--ink-rgb), 0.18);
+  /* --- Sombras · casi inexistentes, mandan las líneas ----- */
+  --shadow-sm: none;
+  --shadow-md: 0 6px 20px rgba(var(--ink-rgb), 0.05);
+  --shadow-lg: 0 18px 44px rgba(var(--ink-rgb), 0.07);
+  --shadow-accent: none;
 
   /* --- Espaciado ----------------------------------------- */
   --sp-1: 4px;

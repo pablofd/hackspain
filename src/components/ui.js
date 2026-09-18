@@ -45,11 +45,11 @@ export function stat({ label, value, unit, trend, foot, spark, tint }) {
         el("span", { class: `trend trend--${up ? "up" : "down"}` }, `${up ? "▲" : "▼"} ${Math.abs(trend)}%`),
       foot && el("span", {}, foot),
     ),
-    spark && sparkline(spark, "var(--ink-black)"),
+    spark && sparkline(spark, "var(--dusty-denim)"),
   );
 }
 
-export function sparkline(values, color = "var(--ink-black)") {
+export function sparkline(values, color = "var(--dusty-denim)") {
   const w = 240;
   const h = 44;
   const max = Math.max(...values);
@@ -85,7 +85,7 @@ export function sparkline(values, color = "var(--ink-black)") {
   );
 }
 
-export function barChart(data, { height = 190, color = "var(--ink-black)" } = {}) {
+export function barChart(data, { height = 190, color = "var(--pitch-black)" } = {}) {
   const w = 620;
   const max = Math.max(...data.map((d) => d.value));
   const gap = 14;
@@ -113,7 +113,7 @@ export function barChart(data, { height = 190, color = "var(--ink-black)" } = {}
           y,
           width: bw,
           height: bh,
-          rx: 7,
+          rx: 0,
           fill: color,
           opacity: 0.5 + (d.value / max) * 0.5,
         }),
@@ -153,8 +153,8 @@ export function stackedBars(data, { height = 190 } = {}) {
           y: baseY - ah - hh,
           width: bw,
           height: hh,
-          rx: 6,
-          fill: "var(--gray-300)",
+          rx: 0,
+          fill: "var(--dusty-denim)",
           opacity: 1,
         }),
         svg("rect", {
@@ -162,8 +162,8 @@ export function stackedBars(data, { height = 190 } = {}) {
           y: baseY - ah,
           width: bw,
           height: ah,
-          rx: 6,
-          fill: "var(--ink-black)",
+          rx: 0,
+          fill: "var(--pitch-black)",
           opacity: 1,
         }),
         svg(
@@ -198,7 +198,7 @@ export function donut(data, { size = 168, thickness = 22, center = "" } = {}) {
       "stroke-width": thickness,
       "stroke-dasharray": `${len - 3} ${c - len + 3}`,
       "stroke-dashoffset": -offset,
-      "stroke-linecap": "round",
+      "stroke-linecap": "butt",
       transform: `rotate(-90 ${size / 2} ${size / 2})`,
     });
     offset += len;

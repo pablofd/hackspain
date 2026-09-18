@@ -41,18 +41,19 @@ SF Pro Regular (400) para toda la interfaz; SF Pro Light (300) reservado a texto
 
 ## Paleta
 
-La interfaz es **monocroma**: Ink Black sobre blanco y Platinum, con una escala de grises
-derivada. La jerarquía de estados se resuelve con el relleno, no con el color:
-negro sólido = crítico, contorno negro = destacado, gris = correcto.
+Plataforma **blanca** con aristas vivas (radio 0) y hairlines de 1 px. El color entra con
+moderación: el rojo queda reservado a lo crítico.
 
 | Nombre | Hex | Uso |
 | --- | --- | --- |
-| Ink Black | `#0D1B1E` | Texto, acento, botones sólidos, gráficos y avatares |
-| Platinum | `#EFEFEF` | Base de la interfaz |
-| White | `#FFFFFF` | Superficies de tarjeta y paneles de vidrio |
+| Pitch Black | `#12100E` | Texto, marca, botones primarios, serie principal de gráficos |
+| Parchment | `#F6F0ED` | Superficies suaves: hover, tarjetas tintadas, burbujas del paciente |
+| Dusty Denim | `#748CAB` | Acento de datos: series secundarias, sparklines, avatares |
+| Blue Slate | `#646E78` | Texto secundario y etiquetas |
+| Lipstick Red | `#EC0B43` | Solo crítico: escalados, riesgo alto, cola de llamadas |
+| White | `#FFFFFF` | Fondo y superficies de tarjeta |
 
-Grises derivados: `#232C2F`, `#4F5759`, `#8B9294`, `#B7BCBD`, `#D9DCDC`.
-Los colores cromáticos anteriores quedan archivados en `design/palette.json` bajo `reserved`.
+Las paletas anteriores quedan archivadas en `design/palette.json` bajo `reserved`.
 
 ## Conectar agentes reales
 
