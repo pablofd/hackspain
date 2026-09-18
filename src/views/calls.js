@@ -329,20 +329,25 @@ export function signalsPanel(c) {
     .filter((k) => k.id !== c.id && (k.reason === c.reason || k.sentiment === c.sentiment))
     .slice(0, 3);
 
-  const liveNumber = el("span", { class: "mono" }, `${angerRisk}% enfado · actualizando`);
-  tick(liveNumber, angerRisk);
+  const isLive = c.outcome === "pending";
+  const liveNumber = el(
+    "span",
+    { class: "mono" },
+    isLive ? `${angerRisk}% enfado · actualizando` : `${angerRisk}% enfado · ${c.duration}`,
+  );
+  if (isLive) tick(liveNumber, angerRisk);
 
   return [
     el(
       "div",
       { class: "signals__strip brand-wash" },
-      el("span", { class: "dot dot--pulse" }),
-      el("span", {}, `Lectura en vivo · ${c.agent}`),
+      isLive ? el("span", { class: "dot dot--pulse" }) : el("span", { class: "dot" }),
+      el("span", {}, `${isLive ? "Lectura en vivo" : "Lectura realizada"} · ${c.agent}`),
       liveNumber,
     ),
 
     card(
-      { title: "Estado emocional del paciente", sub: "Inferido de prosodia, léxico y ritmo" },
+      { title: "Estado emocional del paciente", sub: isLive ? "Inferido en directo de prosodia, léxico y ritmo" : "Inferido de prosodia, léxico y ritmo" },
       el(
         "div",
         { class: "gauge-row" },
