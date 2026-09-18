@@ -1,6 +1,7 @@
 import { el, mount, initials } from "../lib/dom.js";
 import { icon } from "../lib/icons.js";
 import { card, pill, stat } from "../components/ui.js";
+import { openDrawer } from "../components/drawer.js";
 import { clients, riskLabels, calls } from "../data/mock.js";
 
 export const meta = {
@@ -86,7 +87,7 @@ export function render() {
         ),
       ),
       card(
-        { title: "Contexto para el agente", sub: "Se inyecta en el prompt de la llamada", tint: "accent" },
+        { title: "Contexto para maio", sub: "Se inyecta en el prompt de la llamada", tint: "accent" },
         el(
           "div",
           { class: "chips", style: { marginBottom: "12px" } },
@@ -96,6 +97,16 @@ export function render() {
           "p",
           { class: "text-sm secondary" },
           "Paciente con seguimiento activo. Verificar identidad con fecha de nacimiento antes de compartir resultados. Prefiere citas en horario de mañana.",
+        ),
+        el(
+          "button",
+          {
+            class: "btn btn--primary btn--sm",
+            style: { marginTop: "14px" },
+            onclick: () => contextDrawer(c),
+          },
+          icon("plus", "nav__icon"),
+          "Añadir como contexto del agente",
         ),
       ),
       card(
@@ -186,4 +197,42 @@ export function render() {
       detailHost,
     ),
   );
+}
+
+/* Nota que maio leerá antes de hablar con este paciente */
+function contextDrawer(c) {
+  openDrawer({
+    title: "Contexto para maio",
+    sub: `${c.name} · ${c.id}`,
+    body: () => [
+      el(
+        "p",
+        { class: "text-sm secondary", style: { marginBottom: "18px" } },
+        `Lo que escribas aquí se inyecta en el prompt cada vez que maio hable con ${c.name}. Úsalo para preferencias, avisos y acuerdos previos.`,
+      ),
+      el("div", { class: "section-title" }, "Nota de contexto"),
+      el(
+        "textarea",
+        { class: "textarea", style: { minHeight: "160px" }, placeholder: "Prefiere citas de mañana. Acude acompañada. Evitar llamadas antes de las 10:00." },
+      ),
+      el("div", { class: "section-title", style: { marginTop: "22px" } }, "Añadir rápido"),
+      el(
+        "div",
+        { class: "chips" },
+        ...[
+          "Prefiere mañanas",
+          "Evitar llamadas en horario laboral",
+          "Verificar identidad siempre",
+          "Habla en català",
+          "Requiere trato prioritario",
+        ].map((t) => el("button", { class: "chip", type: "button" }, `+ ${t}`)),
+      ),
+      el("div", { class: "section-title", style: { marginTop: "22px" } }, "Etiquetas actuales"),
+      el("div", { class: "chips" }, ...c.tags.map((t) => el("span", { class: "chip" }, t))),
+    ],
+    footer: (close) => [
+      el("button", { class: "btn btn--primary", onclick: close }, "Guardar contexto"),
+      el("button", { class: "btn btn--ghost ml-auto", onclick: close }, "Cancelar"),
+    ],
+  });
 }

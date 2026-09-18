@@ -1,6 +1,7 @@
 import { el, mount, svg } from "../lib/dom.js";
 import { icon } from "../lib/icons.js";
 import { card, pill } from "../components/ui.js";
+import { networkPanel } from "../components/network.js";
 import { calls, outcomeLabels, sentimentLabels } from "../data/mock.js";
 
 export const meta = {
@@ -19,6 +20,7 @@ export function render() {
   let filter = "all";
   let selected = calls[0];
   let signalsOpen = false;
+  let mapOpen = false;
 
   const heroHost = el("div", { class: "calls__panel" });
   const signalsHost = el("aside", { class: "signals", hidden: true });
@@ -168,6 +170,22 @@ export function render() {
   );
 
   const grid = el("div", { class: "grid grid--calls" }, listCard, heroHost, signalsHost);
+  const board = el("div", {}, grid);
+
+  const mapBtn = el(
+    "button",
+    {
+      class: "btn",
+      onclick: () => {
+        mapOpen = !mapOpen;
+        mapBtn.classList.toggle("btn--primary", mapOpen);
+        mapBtn.lastChild.textContent = mapOpen ? "Ocultar mapa" : "Ver mapa";
+        mount(board, mapOpen ? networkPanel() : grid);
+      },
+    },
+    icon("relations", "nav__icon"),
+    el("span", {}, "Ver mapa"),
+  );
 
   function toggleSignals() {
     signalsOpen = !signalsOpen;
@@ -190,9 +208,9 @@ export function render() {
       filterBar,
       el("button", { class: "btn btn--ghost" }, icon("filter", "nav__icon"), "Más filtros"),
       el("button", { class: "btn btn--ghost ml-auto" }, icon("download", "nav__icon"), "Exportar CSV"),
-      el("button", { class: "btn btn--primary" }, icon("phone", "nav__icon"), "Nueva llamada saliente"),
+      mapBtn,
     ),
-    grid,
+    board,
   );
 }
 

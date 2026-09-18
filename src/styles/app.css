@@ -169,6 +169,8 @@ textarea {
 }
 
 .brand__mark {
+  position: relative;
+  top: 3px;
   width: 19px;
   height: 19px;
   flex: none;
@@ -200,7 +202,7 @@ textarea {
 
 .nav__label {
   padding: 0 var(--sp-3) var(--sp-2);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: var(--fw-regular);
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -213,13 +215,13 @@ textarea {
   align-items: center;
   gap: var(--sp-3);
   width: 100%;
-  padding: 8px var(--sp-3);
+  padding: 9px var(--sp-3);
   margin-bottom: 2px;
   border: 0;
   border-radius: var(--r-sm);
   background: transparent;
   color: rgba(var(--blue-slate-rgb), 0.7);
-  font-size: 13.5px;
+  font-size: 15px;
   font-weight: var(--fw-regular);
   letter-spacing: -0.01em;
   cursor: pointer;
@@ -244,8 +246,8 @@ textarea {
 
 .nav__icon {
   flex: none;
-  width: 18px;
-  height: 18px;
+  width: 19px;
+  height: 19px;
   opacity: 0.86;
 }
 
