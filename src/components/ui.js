@@ -221,7 +221,7 @@ export function donut(data, { size = 180, thickness = 10, center = "" } = {}) {
           "text-anchor": "middle",
           fill: "var(--text-primary)",
           "font-size": "28",
-          "font-weight": "300",
+          "font-weight": "400",
           "letter-spacing": "-1",
         },
         center,

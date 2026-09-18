@@ -90,7 +90,7 @@
     BlinkMacSystemFont, "Helvetica Neue", Inter, system-ui, sans-serif;
   --font-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-brand: "Space Grotesk", var(--font-ui);
-  --fw-light: 300;
+  /* Toda la interfaz en Regular: el Light perdía legibilidad */
   --fw-regular: 400;
 
   /* --- Movimiento ---------------------------------------- */

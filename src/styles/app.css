@@ -357,7 +357,7 @@ textarea {
 
 .topbar__title {
   font-size: 24px;
-  font-weight: var(--fw-light);
+  font-weight: var(--fw-regular);
   letter-spacing: -0.03em;
 }
 
@@ -723,7 +723,7 @@ textarea {
 
 .stat__value {
   font-size: 30px;
-  font-weight: var(--fw-light);
+  font-weight: var(--fw-regular);
   letter-spacing: -0.035em;
   font-variant-numeric: tabular-nums;
   line-height: 1.05;
@@ -731,7 +731,7 @@ textarea {
 
 .stat__value small {
   font-size: 14px;
-  font-weight: var(--fw-light);
+  font-weight: var(--fw-regular);
   color: var(--text-muted);
   margin-left: 3px;
 }
@@ -1270,7 +1270,7 @@ table.data .cell-sub {
 
 .gauge__value {
   font-size: 26px;
-  font-weight: var(--fw-light);
+  font-weight: var(--fw-regular);
   letter-spacing: -0.03em;
   line-height: 1;
 }
