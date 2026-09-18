@@ -259,8 +259,8 @@ function mapPanel(a) {
       el(
         "div",
         { class: "map__legend" },
-        el("span", {}, "Grosor de la flecha = número de llamadas"),
-        el("span", { class: "text-alert" }, "Rojo = hubo escalado a humano"),
+        el("span", {}, "Grosor del trazo = número de llamadas"),
+        el("span", { class: "text-alert" }, "Aro rojo = hubo escalado a humano"),
       ),
   );
 }
@@ -270,50 +270,57 @@ function graph(a, nodes) {
   const h = 400;
   const cx = w / 2;
   const cy = h / 2;
-  const rx = 200;
-  const ry = 142;
-  const arrow = `arrow-${Math.random().toString(36).slice(2, 7)}`;
-  const arrowHot = `${arrow}-hot`;
-
+  const rx = 198;
+  const ry = 140;
+  const clips = [];
   const edges = [];
   const dots = [];
 
   nodes.forEach((n, i) => {
-    const angle = (-Math.PI / 2) + (i / nodes.length) * Math.PI * 2;
+    const angle = -Math.PI / 2 + (i / nodes.length) * Math.PI * 2;
     const x = cx + Math.cos(angle) * rx;
     const y = cy + Math.sin(angle) * ry;
-    const from = { x: cx + Math.cos(angle) * 48, y: cy + Math.sin(angle) * 48 };
-    const to = { x: x - Math.cos(angle) * 30, y: y - Math.sin(angle) * 30 };
-    const mid = { x: (from.x + to.x) / 2 - Math.sin(angle) * 22, y: (from.y + to.y) / 2 + Math.cos(angle) * 22 };
+    const from = { x: cx + Math.cos(angle) * 46, y: cy + Math.sin(angle) * 46 };
+    const to = { x: x - Math.cos(angle) * 24, y: y - Math.sin(angle) * 24 };
+    // Curvatura alterna a cada lado para que el haz no quede simétrico
+    const bend = (i % 2 ? 1 : -1) * (16 + (i % 3) * 7);
+    const mid = {
+      x: (from.x + to.x) / 2 - Math.sin(angle) * bend,
+      y: (from.y + to.y) / 2 + Math.cos(angle) * bend,
+    };
 
     edges.push(
       svg("path", {
         d: `M${from.x.toFixed(1)} ${from.y.toFixed(1)} Q${mid.x.toFixed(1)} ${mid.y.toFixed(1)} ${to.x.toFixed(1)} ${to.y.toFixed(1)}`,
         fill: "none",
-        stroke: n.escalated ? "var(--lipstick-red)" : "var(--dusty-denim)",
-        "stroke-width": 1 + Math.min(n.count, 4) * 0.7,
-        "marker-end": `url(#${n.escalated ? arrowHot : arrow})`,
-        opacity: 0.85,
+        stroke: "rgba(var(--ink-rgb), 0.28)",
+        "stroke-width": 0.6 + Math.min(n.count, 4) * 0.25,
+        "stroke-linecap": "round",
       }),
     );
+
+    const clipId = `mc-${i}-${Math.random().toString(36).slice(2, 6)}`;
+    clips.push(svg("clipPath", { id: clipId }, svg("circle", { cx: x, cy: y, r: 21 })));
 
     dots.push(
       svg(
         "g",
         {},
+        svg("circle", { cx: x, cy: y, r: 21, fill: "var(--white)" }),
+        svg(
+          "text",
+          { x, y: y + 4, "text-anchor": "middle", "font-size": "12", fill: "var(--text-secondary)" },
+          n.name[0],
+        ),
+        photo(n.name, x, y, 21, clipId),
         svg("circle", {
           cx: x,
           cy: y,
           r: 21,
-          fill: "var(--white)",
-          stroke: n.escalated ? "var(--lipstick-red)" : "var(--stroke-strong)",
-          "stroke-width": 1.2,
+          fill: "none",
+          stroke: n.escalated ? "var(--lipstick-red)" : "rgba(var(--ink-rgb), 0.35)",
+          "stroke-width": n.escalated ? 1.6 : 1,
         }),
-        svg(
-          "text",
-          { x, y: y + 4, "text-anchor": "middle", "font-size": "12", fill: "var(--text-primary)" },
-          n.name[0],
-        ),
         svg("text", { x, y: y + 38, "text-anchor": "middle", class: "map__node-label" }, n.name),
         svg(
           "text",
@@ -324,43 +331,42 @@ function graph(a, nodes) {
     );
   });
 
+  const agentClip = `ma-${Math.random().toString(36).slice(2, 6)}`;
+  clips.push(svg("clipPath", { id: agentClip }, svg("circle", { cx, cy, r: 40 })));
+
   return svg(
     "svg",
     { class: "map__canvas", viewBox: `0 0 ${w} ${h}`, role: "img", "aria-label": `Red de ${a.name}` },
-    svg(
-      "defs",
-      {},
-      marker(arrow, "var(--dusty-denim)"),
-      marker(arrowHot, "var(--lipstick-red)"),
-    ),
+    svg("defs", {}, ...clips),
     ...edges,
-    svg("circle", { cx, cy, r: 46, fill: "var(--pitch-black)" }),
+    svg("circle", { cx, cy, r: 40, fill: "var(--pitch-black)" }),
     svg(
       "text",
-      { x: cx, y: cy + 2, "text-anchor": "middle", "font-size": "20", fill: "var(--white)" },
+      { x: cx, y: cy + 6, "text-anchor": "middle", "font-size": "18", fill: "var(--white)" },
       a.name[0],
     ),
+    photo(a.name, cx, cy, 40, agentClip),
+    svg("circle", { cx, cy, r: 40, fill: "none", stroke: "var(--pitch-black)", "stroke-width": 2.5 }),
     svg(
       "text",
-      { x: cx, y: cy + 20, "text-anchor": "middle", "font-size": "9.5", fill: "rgba(255,255,255,0.72)" },
+      { x: cx, y: cy + 60, "text-anchor": "middle", "font-size": "11", fill: "var(--text-primary)" },
       a.name,
     ),
     ...dots,
   );
 }
 
-function marker(id, color) {
-  return svg(
-    "marker",
-    {
-      id,
-      viewBox: "0 0 10 10",
-      refX: "9",
-      refY: "5",
-      markerWidth: "5",
-      markerHeight: "5",
-      orient: "auto-start-reverse",
-    },
-    svg("path", { d: "M0 1 L9 5 L0 9 z", fill: color }),
-  );
+/* Retrato estable por nombre; si no carga, queda la inicial dibujada debajo */
+function photo(name, x, y, r, clipId) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) % 70;
+  return svg("image", {
+    href: `https://i.pravatar.cc/160?img=${hash + 1}`,
+    x: x - r,
+    y: y - r,
+    width: r * 2,
+    height: r * 2,
+    "clip-path": `url(#${clipId})`,
+    preserveAspectRatio: "xMidYMid slice",
+  });
 }
