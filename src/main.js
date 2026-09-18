@@ -99,7 +99,7 @@ function sidebar() {
       el(
         "div",
         { class: "row" },
-        el("span", { class: "pill pill--green" }, el("span", { class: "dot dot--pulse" }), "En directo"),
+        el("span", { class: "pill pill--ok" }, el("span", { class: "dot dot--pulse" }), "En directo"),
         el("button", { class: "btn btn--sm btn--ghost ml-auto" }, "Pausar"),
       ),
     ),

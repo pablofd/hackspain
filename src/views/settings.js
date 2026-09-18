@@ -7,12 +7,11 @@ export const meta = {
 };
 
 const PALETTE = [
-  ["White", "#FFFFFF", "Fondo de la plataforma"],
-  ["Charcoal", "#565656", "Texto secundario y bordes"],
-  ["Light Green", "#B2FFA9", "Acento principal y estados activos"],
-  ["Blazing Flame", "#FF4A1C", "Urgencias y acciones críticas"],
-  ["Coffee Bean", "#81523F", "Superficies cálidas elevadas"],
-  ["Deep Mocha", "#3F2A2B", "Texto oscuro y avatares"],
+  ["Ink Black", "#0D1B1E", "Texto principal y superficies oscuras"],
+  ["Platinum", "#EFEFEF", "Base de la interfaz"],
+  ["Dusty Mauve", "#A54657", "Color principal para destacar"],
+  ["Tropical Teal", "#48A9A6", "Detalle: estados correctos"],
+  ["Coral Glow", "#FF8552", "Detalle: alertas y urgencias"],
 ];
 
 export function render() {
@@ -117,7 +116,7 @@ export function render() {
                 el("div", { class: "list__title" }, n),
                 el("div", { class: "list__meta" }, r),
               ),
-              pill(role, role === "Admin" ? "green" : "neutral"),
+              pill(role, role === "Admin" ? "accent" : "neutral"),
             ),
           ),
           el(
@@ -130,7 +129,7 @@ export function render() {
     ),
 
     card(
-      { title: "Sistema de diseño", sub: "Paleta guardada en /design/palette.json", tint: "coffee" },
+      { title: "Sistema de diseño", sub: "Paleta guardada en /design/palette.json", tint: "accent" },
       el(
         "div",
         { class: "grid grid--3", style: { gap: "12px" } },

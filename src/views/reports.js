@@ -30,9 +30,9 @@ export function render() {
       "div",
       { class: "grid grid--4" },
       stat({ label: "Llamadas atendidas", value: "8.412", trend: 9.2, foot: "últimos 30 días" }),
-      stat({ label: "Coste por llamada", value: "0,42", unit: "€", trend: -21.5, foot: "vs. 1,90 € humano", tint: "green" }),
+      stat({ label: "Coste por llamada", value: "0,42", unit: "€", trend: -21.5, foot: "vs. 1,90 € humano", tint: "ok" }),
       stat({ label: "Citas generadas", value: "3.196", trend: 14.8, foot: "38% del volumen" }),
-      stat({ label: "Horas liberadas", value: "486", unit: "h", trend: 11.3, foot: "equipo de recepción", tint: "coffee" }),
+      stat({ label: "Horas liberadas", value: "486", unit: "h", trend: 11.3, foot: "equipo de recepción", tint: "accent" }),
     ),
 
     el(
@@ -42,8 +42,8 @@ export function render() {
         { title: "Automatizado vs. humano", sub: "Porcentaje de llamadas por día de la semana" },
         stackedBars(weeklyTrend),
         legend([
-          { label: "Resuelto por agente", color: "var(--light-green)" },
-          { label: "Escalado a humano", color: "var(--coffee-bean)" },
+          { label: "Resuelto por agente", color: "var(--dusty-mauve)" },
+          { label: "Escalado a humano", color: "var(--chart-label)" },
         ]),
       ),
       card(
@@ -56,7 +56,7 @@ export function render() {
     el(
       "div",
       { class: "grid grid--main" },
-      card({ title: "Volumen por franja", sub: "Media del periodo" }, barChart(volumeByHour, { color: "var(--coffee-bean)" })),
+      card({ title: "Volumen por franja", sub: "Media del periodo" }, barChart(volumeByHour, { color: "var(--tropical-teal)" })),
       card(
         { title: "Calidad por agente", sub: "Resolución en primera llamada" },
         el(
@@ -87,12 +87,12 @@ export function render() {
       "div",
       { class: "grid grid--3" },
       card(
-        { title: "Satisfacción (NPS)", tint: "green" },
+        { title: "Satisfacción (NPS)", tint: "ok" },
         el("div", { class: "stat__value", style: { fontSize: "38px" } }, "62"),
         el("p", { class: "card__sub" }, "Promotores 71% · Pasivos 20% · Detractores 9%"),
       ),
       card(
-        { title: "Cumplimiento", tint: "coffee" },
+        { title: "Cumplimiento", tint: "accent" },
         el(
           "dl",
           { class: "kv" },
@@ -107,7 +107,7 @@ export function render() {
         ),
       ),
       card(
-        { title: "Alertas del periodo", tint: "flame" },
+        { title: "Alertas del periodo", tint: "alert" },
         el(
           "div",
           { class: "list" },

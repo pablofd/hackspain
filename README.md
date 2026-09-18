@@ -28,15 +28,15 @@ python3 -m http.server 4321
 
 | Nombre | Hex | Uso |
 | --- | --- | --- |
-| White | `#FFFFFF` | Fondo de la plataforma y superficies |
-| Charcoal | `#565656` | Texto secundario y bordes |
-| Light Green | `#B2FFA9` | Acento principal, estados activos |
-| Blazing Flame | `#FF4A1C` | Urgencias y acciones críticas |
-| Coffee Bean | `#81523F` | Superficies cálidas elevadas |
-| Deep Mocha | `#3F2A2B` | Texto oscuro, avatares y sombras |
+| Ink Black | `#0D1B1E` | Texto principal, avatares, bordes y sombras |
+| Platinum | `#EFEFEF` | Base de la interfaz junto al blanco |
+| Dusty Mauve | `#A54657` | Color principal para destacar y acciones primarias |
+| Tropical Teal | `#48A9A6` | Detalle: estados correctos y agentes en línea |
+| Coral Glow | `#FF8552` | Detalle: alertas, urgencias y escalados |
+| White | `#FFFFFF` | Superficies de tarjeta y paneles de vidrio |
 
-Sobre blanco se usan dos sombras derivadas para asegurar contraste de texto:
-`--green-deep: #1F5C22` y `--flame-deep: #C9350F`.
+Sobre fondo claro se usan tres sombras derivadas para asegurar contraste de texto:
+`--mauve-deep: #8B3849`, `--teal-deep: #2C7A77` y `--coral-deep: #C2542A`.
 
 ## Conectar agentes reales
 

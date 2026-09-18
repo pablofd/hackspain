@@ -29,7 +29,7 @@ export function render() {
         trend: kpis.automation.trend,
         foot: "sin intervención humana",
         spark: kpis.automation.spark,
-        tint: "green",
+        tint: "ok",
       }),
       stat({
         label: "Duración media",
@@ -44,7 +44,7 @@ export function render() {
         trend: kpis.escalations.trend,
         foot: "6,7% del total",
         spark: kpis.escalations.spark,
-        tint: "flame",
+        tint: "alert",
       }),
     ),
 
@@ -167,7 +167,7 @@ export function render() {
             ...activity.map((a) =>
               el(
                 "div",
-                { class: `timeline__item${a.kind === "alert" ? " timeline__item--flame" : ""}` },
+                { class: `timeline__item${a.kind === "alert" ? " timeline__item--alert" : ""}` },
                 el("div", { class: "timeline__time" }, a.time),
                 el("div", { class: "timeline__title" }, a.title),
                 el("div", { class: "timeline__desc" }, a.desc),
@@ -176,7 +176,7 @@ export function render() {
           ),
         ),
         card(
-          { title: "Agentes en servicio", tint: "coffee" },
+          { title: "Agentes en servicio", tint: "accent" },
           el(
             "div",
             { class: "list" },

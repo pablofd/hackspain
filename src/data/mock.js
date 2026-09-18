@@ -11,7 +11,7 @@ export const agents = [
     id: "agt_ines",
     name: "Inés",
     role: "Recepción · Atención primaria",
-    tone: "coffee",
+    tone: "mauve",
     status: "online",
     language: "ES · CA",
     voice: "Sofía Neural",
@@ -25,7 +25,7 @@ export const agents = [
     id: "agt_marc",
     name: "Marc",
     role: "Triaje telefónico",
-    tone: "flame",
+    tone: "coral",
     status: "online",
     language: "ES · EN",
     voice: "Álvaro Neural",
@@ -39,7 +39,7 @@ export const agents = [
     id: "agt_lucia",
     name: "Lucía",
     role: "Resultados y seguimiento",
-    tone: "green",
+    tone: "teal",
     status: "online",
     language: "ES",
     voice: "Lucía Neural",
@@ -53,7 +53,7 @@ export const agents = [
     id: "agt_dani",
     name: "Dani",
     role: "Facturación y mutuas",
-    tone: "coffee",
+    tone: "teal",
     status: "paused",
     language: "ES",
     voice: "Diego Neural",
@@ -67,7 +67,7 @@ export const agents = [
     id: "agt_nora",
     name: "Nora",
     role: "Campañas de revisión",
-    tone: "green",
+    tone: "mauve",
     status: "draft",
     language: "ES",
     voice: "Nora Neural",
@@ -414,11 +414,11 @@ export const volumeByHour = [
 ];
 
 export const reasonsBreakdown = [
-  { label: "Agendar cita", value: 38, color: "var(--blazing-flame)" },
-  { label: "Reprogramar", value: 21, color: "var(--coffee-bean)" },
-  { label: "Resultados", value: 16, color: "var(--green-deep)" },
-  { label: "Triaje clínico", value: 14, color: "var(--light-green)" },
-  { label: "Facturación", value: 11, color: "var(--charcoal)" },
+  { label: "Agendar cita", value: 38, color: "var(--dusty-mauve)" },
+  { label: "Reprogramar", value: 21, color: "var(--tropical-teal)" },
+  { label: "Resultados", value: 16, color: "var(--coral-glow)" },
+  { label: "Triaje clínico", value: 14, color: "var(--mauve-deep)" },
+  { label: "Facturación", value: 11, color: "var(--chart-label)" },
 ];
 
 export const weeklyTrend = [
@@ -440,25 +440,25 @@ export const activity = [
 ];
 
 export const outcomeLabels = {
-  resolved: { text: "Resuelta", pill: "pill--green" },
-  escalated: { text: "Escalada", pill: "pill--flame" },
-  pending: { text: "Pendiente", pill: "pill--coffee" },
+  resolved: { text: "Resuelta", pill: "pill--ok" },
+  escalated: { text: "Escalada", pill: "pill--alert" },
+  pending: { text: "Pendiente", pill: "pill--accent" },
 };
 
 export const sentimentLabels = {
-  positive: { text: "Positivo", cls: "text-green" },
+  positive: { text: "Positivo", cls: "text-ok" },
   neutral: { text: "Neutro", cls: "muted" },
-  negative: { text: "Negativo", cls: "text-flame" },
+  negative: { text: "Negativo", cls: "text-alert" },
 };
 
 export const riskLabels = {
-  low: { text: "Bajo", pill: "pill--green" },
-  medium: { text: "Medio", pill: "pill--coffee" },
-  high: { text: "Alto", pill: "pill--flame" },
+  low: { text: "Bajo", pill: "pill--ok" },
+  medium: { text: "Medio", pill: "pill--accent" },
+  high: { text: "Alto", pill: "pill--alert" },
 };
 
 export const statusLabels = {
-  online: { text: "En línea", pill: "pill--green" },
-  paused: { text: "En pausa", pill: "pill--coffee" },
+  online: { text: "En línea", pill: "pill--ok" },
+  paused: { text: "En pausa", pill: "pill--accent" },
   draft: { text: "Borrador", pill: "pill--neutral" },
 };

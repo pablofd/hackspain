@@ -60,15 +60,15 @@ export function render() {
       "div",
       { class: "grid grid--aside" },
       card(
-        { title: "Sistemas conectados", sub: "Estado de las integraciones", tint: "coffee" },
+        { title: "Sistemas conectados", sub: "Estado de las integraciones", tint: "accent" },
         el(
           "div",
           { class: "list" },
           ...[
-            ["Doctoralia", "Agenda y profesionales", "green", "Operativo"],
-            ["HIS · HL7 FHIR", "Historia clínica", "green", "Operativo"],
-            ["Adeslas API", "Coberturas y autorizaciones", "coffee", "Latencia alta"],
-            ["Twilio Voice", "Telefonía SIP", "green", "Operativo"],
+            ["Doctoralia", "Agenda y profesionales", "ok", "Operativo"],
+            ["HIS · HL7 FHIR", "Historia clínica", "ok", "Operativo"],
+            ["Adeslas API", "Coberturas y autorizaciones", "alert", "Latencia alta"],
+            ["Twilio Voice", "Telefonía SIP", "ok", "Operativo"],
             ["Stripe", "Cobros", "neutral", "Desconectado"],
           ].map(([n, d, tone, label]) =>
             el(

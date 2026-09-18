@@ -1,62 +1,68 @@
 {
   "name": "Aurea Health — Core Palette",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "colors": [
+    {
+      "token": "ink-black",
+      "name": "Ink Black",
+      "hex": "#0D1B1E",
+      "rgb": [13, 27, 30],
+      "role": "Texto principal, avatares, bordes y sombras"
+    },
+    {
+      "token": "platinum",
+      "name": "Platinum",
+      "hex": "#EFEFEF",
+      "rgb": [239, 239, 239],
+      "role": "Base de la interfaz junto al blanco"
+    },
+    {
+      "token": "dusty-mauve",
+      "name": "Dusty Mauve",
+      "hex": "#A54657",
+      "rgb": [165, 70, 87],
+      "role": "Color principal: elementos destacados, activos y acciones primarias"
+    },
+    {
+      "token": "tropical-teal",
+      "name": "Tropical Teal",
+      "hex": "#48A9A6",
+      "rgb": [72, 169, 166],
+      "role": "Detalle: estados correctos, agentes en línea, huecos libres"
+    },
+    {
+      "token": "coral-glow",
+      "name": "Coral Glow",
+      "hex": "#FF8552",
+      "rgb": [255, 133, 82],
+      "role": "Detalle: alertas, urgencias y escalados"
+    },
     {
       "token": "white",
       "name": "White",
       "hex": "#FFFFFF",
       "rgb": [255, 255, 255],
-      "role": "Fondo de la plataforma y superficies de tarjeta"
-    },
-    {
-      "token": "charcoal",
-      "name": "Charcoal",
-      "hex": "#565656",
-      "rgb": [86, 86, 86],
-      "role": "Texto secundario, bordes neutros, superficies apagadas"
-    },
-    {
-      "token": "light-green",
-      "name": "Light Green",
-      "hex": "#B2FFA9",
-      "rgb": [178, 255, 169],
-      "role": "Acento principal: estados activos, éxito, agentes en línea"
-    },
-    {
-      "token": "blazing-flame",
-      "name": "Blazing Flame",
-      "hex": "#FF4A1C",
-      "rgb": [255, 74, 28],
-      "role": "Acciones críticas, urgencias clínicas, escalado a humano"
-    },
-    {
-      "token": "coffee-bean",
-      "name": "Coffee Bean",
-      "hex": "#81523F",
-      "rgb": [129, 82, 63],
-      "role": "Superficies elevadas cálidas, hover, separadores"
-    },
-    {
-      "token": "deep-mocha",
-      "name": "Deep Mocha",
-      "hex": "#3F2A2B",
-      "rgb": [63, 42, 43],
-      "role": "Texto principal, avatares y sombras"
+      "role": "Superficies de tarjeta y paneles de vidrio"
     }
   ],
   "derived": [
     {
-      "token": "green-deep",
-      "hex": "#1F5C22",
-      "from": "light-green",
-      "role": "Texto y trazos verdes legibles sobre blanco"
+      "token": "mauve-deep",
+      "hex": "#8B3849",
+      "from": "dusty-mauve",
+      "role": "Texto y degradados sobre fondo claro"
     },
     {
-      "token": "flame-deep",
-      "hex": "#C9350F",
-      "from": "blazing-flame",
-      "role": "Texto y trazos de alerta legibles sobre blanco"
+      "token": "teal-deep",
+      "hex": "#2C7A77",
+      "from": "tropical-teal",
+      "role": "Texto legible en estados correctos"
+    },
+    {
+      "token": "coral-deep",
+      "hex": "#C2542A",
+      "from": "coral-glow",
+      "role": "Texto legible en alertas"
     }
   ]
 }

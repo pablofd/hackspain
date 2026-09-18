@@ -56,7 +56,7 @@ export function render() {
       "div",
       { class: "grid grid--aside" },
       card(
-        { title: "Preguntas sin respuesta", sub: "Detectadas en llamadas reales", tint: "flame" },
+        { title: "Preguntas sin respuesta", sub: "Detectadas en llamadas reales", tint: "alert" },
         el(
           "div",
           { class: "list" },

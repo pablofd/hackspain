@@ -45,11 +45,11 @@ export function stat({ label, value, unit, trend, foot, spark, tint }) {
         el("span", { class: `trend trend--${up ? "up" : "down"}` }, `${up ? "▲" : "▼"} ${Math.abs(trend)}%`),
       foot && el("span", {}, foot),
     ),
-    spark && sparkline(spark, up ? "var(--green-deep)" : "var(--flame-deep)"),
+    spark && sparkline(spark, up ? "var(--ok-deep)" : "var(--alert-deep)"),
   );
 }
 
-export function sparkline(values, color = "var(--light-green)") {
+export function sparkline(values, color = "var(--accent)") {
   const w = 240;
   const h = 44;
   const max = Math.max(...values);
@@ -154,8 +154,8 @@ export function stackedBars(data, { height = 190 } = {}) {
           width: bw,
           height: hh,
           rx: 6,
-          fill: "var(--coffee-bean)",
-          opacity: 0.8,
+          fill: "var(--ink-black)",
+          opacity: 0.22,
         }),
         svg("rect", {
           x,
@@ -163,7 +163,7 @@ export function stackedBars(data, { height = 190 } = {}) {
           width: bw,
           height: ah,
           rx: 6,
-          fill: "var(--light-green)",
+          fill: "var(--accent)",
           opacity: 1,
         }),
         svg(

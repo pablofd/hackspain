@@ -86,7 +86,7 @@ export function render() {
         ),
       ),
       card(
-        { title: "Contexto para el agente", sub: "Se inyecta en el prompt de la llamada", tint: "coffee" },
+        { title: "Contexto para el agente", sub: "Se inyecta en el prompt de la llamada", tint: "accent" },
         el(
           "div",
           { class: "chips", style: { marginBottom: "12px" } },
@@ -107,7 +107,7 @@ export function render() {
               ...history.map((h) =>
                 el(
                   "div",
-                  { class: `timeline__item${h.outcome === "escalated" ? " timeline__item--flame" : ""}` },
+                  { class: `timeline__item${h.outcome === "escalated" ? " timeline__item--alert" : ""}` },
                   el("div", { class: "timeline__time" }, `${h.time} · ${h.duration}`),
                   el("div", { class: "timeline__title" }, h.reason),
                   el("div", { class: "timeline__desc" }, `Atendida por ${h.agent}`),
@@ -129,9 +129,9 @@ export function render() {
       "div",
       { class: "grid grid--4" },
       stat({ label: "Pacientes activos", value: "4.128", trend: 3.4, foot: "últimos 12 meses" }),
-      stat({ label: "Nuevos este mes", value: "218", trend: 7.9, foot: "captados por agentes", tint: "green" }),
+      stat({ label: "Nuevos este mes", value: "218", trend: 7.9, foot: "captados por agentes", tint: "ok" }),
       stat({ label: "Con cita pendiente", value: "1.042", trend: 2.2, foot: "próximos 30 días" }),
-      stat({ label: "Riesgo alto", value: "37", trend: -1.8, foot: "seguimiento prioritario", tint: "flame" }),
+      stat({ label: "Riesgo alto", value: "37", trend: -1.8, foot: "seguimiento prioritario", tint: "alert" }),
     ),
     el(
       "div",

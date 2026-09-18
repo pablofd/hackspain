@@ -32,7 +32,7 @@ export function render() {
       "div",
       { class: "grid grid--aside" },
       card(
-        { title: "Plantillas", sub: "Arranca desde un rol preconfigurado", tint: "coffee" },
+        { title: "Plantillas", sub: "Arranca desde un rol preconfigurado", tint: "accent" },
         el(
           "div",
           { class: "list" },
@@ -134,7 +134,7 @@ function agentCard(a) {
         el("span", {}, `Voz · ${a.voice}`),
         el("span", { class: "ml-auto" }, a.language),
       ),
-      bar(a.resolution || 4, a.status === "online" ? "" : "bar__fill--coffee"),
+      bar(a.resolution || 4, a.status === "online" ? "" : "bar__fill--muted"),
     ),
     el(
       "div",

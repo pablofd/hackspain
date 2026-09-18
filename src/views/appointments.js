@@ -28,9 +28,9 @@ export function render() {
       "div",
       { class: "grid grid--4" },
       stat({ label: "Citas hoy", value: "48", trend: 6.1, foot: "32 creadas por agentes" }),
-      stat({ label: "Huecos libres", value: String(free * 4), trend: -4.2, foot: "próximas 48 h", tint: "green" }),
+      stat({ label: "Huecos libres", value: String(free * 4), trend: -4.2, foot: "próximas 48 h", tint: "ok" }),
       stat({ label: "Ocupación", value: "86", unit: "%", trend: 3.8, foot: "media de la sede" }),
-      stat({ label: "No-shows", value: "4", trend: -12.5, foot: "recordatorios activos", tint: "flame" }),
+      stat({ label: "No-shows", value: "4", trend: -12.5, foot: "recordatorios activos", tint: "alert" }),
     ),
 
     el(
@@ -56,7 +56,7 @@ export function render() {
         "div",
         { class: "stack stack--lg" },
         card(
-          { title: "Reglas de agenda", sub: "Qué puede hacer un agente sin supervisión", tint: "coffee" },
+          { title: "Reglas de agenda", sub: "Qué puede hacer un agente sin supervisión", tint: "accent" },
           el(
             "div",
             { class: "list" },
