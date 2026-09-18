@@ -115,6 +115,20 @@ function topbar() {
     }
   });
 
+  const fullscreenBtn = el(
+    "button",
+    {
+      class: "btn btn--icon btn--ghost",
+      title: "Pantalla completa (F)",
+      onclick: toggleFullscreen,
+    },
+    icon("expand", "nav__icon"),
+  );
+
+  document.addEventListener("fullscreenchange", () => {
+    mount(fullscreenBtn, icon(document.fullscreenElement ? "collapse" : "expand", "nav__icon"));
+  });
+
   return el(
     "header",
     { class: "topbar" },
@@ -133,9 +147,15 @@ function topbar() {
       "div",
       { class: "topbar__actions" },
       search,
+      fullscreenBtn,
       el("button", { class: "btn btn--icon btn--ghost", title: "Notificaciones" }, icon("bell", "nav__icon")),
     ),
   );
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen();
 }
 
 mount(
@@ -156,6 +176,8 @@ mount(
 
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") document.body.classList.remove("nav-open");
+  const typing = /^(input|textarea|select)$/i.test(e.target.tagName);
+  if (!typing && !e.metaKey && !e.ctrlKey && e.key.toLowerCase() === "f") toggleFullscreen();
 });
 
 window.addEventListener("resize", syncScrollGutter);
