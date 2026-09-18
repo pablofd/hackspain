@@ -85,7 +85,7 @@ export function sparkline(values, color = "var(--light-green)") {
   );
 }
 
-export function barChart(data, { height = 190, color = "var(--light-green)" } = {}) {
+export function barChart(data, { height = 190, color = "var(--accent)" } = {}) {
   const w = 620;
   const max = Math.max(...data.map((d) => d.value));
   const gap = 14;

@@ -34,7 +34,7 @@ export function render() {
           el(
             "div",
             { class: "row" },
-            el("span", { class: "avatar avatar--green" }, icon("actions", "nav__icon")),
+            el("span", { class: "avatar avatar--accent" }, icon("actions", "nav__icon")),
             el(
               "div",
               { style: { minWidth: 0 } },

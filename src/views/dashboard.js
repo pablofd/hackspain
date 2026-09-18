@@ -186,7 +186,7 @@ export function render() {
                 el(
                   "div",
                   { class: "list__item" },
-                  el("span", { class: "avatar avatar--green" }, a.name[0]),
+                  el("span", { class: "avatar avatar--accent" }, a.name[0]),
                   el(
                     "div",
                     { class: "list__body" },

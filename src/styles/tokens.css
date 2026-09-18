@@ -27,8 +27,12 @@
   /* --- Semántica ----------------------------------------- */
   --bg-base: var(--white);
   --bg-deep: var(--deep-mocha);
-  --accent: var(--light-green);
-  --accent-ink: #123b0f;
+  --accent: var(--blazing-flame);
+  --accent-rgb: var(--blazing-flame-rgb);
+  --accent-deep: var(--flame-deep);
+  --accent-ink: #ffffff;
+  --success: var(--light-green);
+  --success-rgb: var(--light-green-rgb);
   --danger: var(--blazing-flame);
   --warm: var(--coffee-bean);
 
@@ -36,7 +40,7 @@
   --text-primary: #26191a;
   --text-secondary: rgba(var(--ink-rgb), 0.68);
   --text-muted: rgba(var(--ink-rgb), 0.46);
-  --text-on-accent: #10300d;
+  --text-on-accent: #ffffff;
   --text-on-dark: #fdf7f2;
 
   /* --- Superficies de vidrio ------------------------------ */
@@ -44,7 +48,7 @@
   --glass-2: rgba(var(--white-rgb), 0.86);
   --glass-3: rgba(var(--ink-rgb), 0.05);
   --glass-hover: rgba(var(--ink-rgb), 0.045);
-  --glass-warm: rgba(var(--coffee-bean-rgb), 0.1);
+  --glass-warm: rgba(var(--accent-rgb), 0.07);
   --stroke-soft: rgba(var(--ink-rgb), 0.09);
   --stroke-strong: rgba(var(--ink-rgb), 0.16);
   --hairline: rgba(var(--ink-rgb), 0.07);
@@ -69,7 +73,7 @@
   --shadow-sm: 0 1px 2px rgba(var(--deep-mocha-rgb), 0.06), 0 2px 8px rgba(var(--deep-mocha-rgb), 0.05);
   --shadow-md: 0 10px 30px rgba(var(--deep-mocha-rgb), 0.1);
   --shadow-lg: 0 26px 70px rgba(var(--deep-mocha-rgb), 0.12);
-  --shadow-accent: 0 2px 6px rgba(var(--light-green-rgb), 0.45);
+  --shadow-accent: 0 2px 8px rgba(var(--accent-rgb), 0.35);
 
   /* --- Espaciado ----------------------------------------- */
   --sp-1: 4px;
