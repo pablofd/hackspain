@@ -45,11 +45,11 @@ export function stat({ label, value, unit, trend, foot, spark, tint }) {
         el("span", { class: `trend trend--${up ? "up" : "down"}` }, `${up ? "▲" : "▼"} ${Math.abs(trend)}%`),
       foot && el("span", {}, foot),
     ),
-    spark && sparkline(spark, up ? "var(--ok-deep)" : "var(--alert-deep)"),
+    spark && sparkline(spark, "var(--ink-black)"),
   );
 }
 
-export function sparkline(values, color = "var(--accent)") {
+export function sparkline(values, color = "var(--ink-black)") {
   const w = 240;
   const h = 44;
   const max = Math.max(...values);
@@ -85,7 +85,7 @@ export function sparkline(values, color = "var(--accent)") {
   );
 }
 
-export function barChart(data, { height = 190, color = "var(--accent)" } = {}) {
+export function barChart(data, { height = 190, color = "var(--ink-black)" } = {}) {
   const w = 620;
   const max = Math.max(...data.map((d) => d.value));
   const gap = 14;
@@ -154,8 +154,8 @@ export function stackedBars(data, { height = 190 } = {}) {
           width: bw,
           height: hh,
           rx: 6,
-          fill: "var(--ink-black)",
-          opacity: 0.22,
+          fill: "var(--gray-300)",
+          opacity: 1,
         }),
         svg("rect", {
           x,
@@ -163,7 +163,7 @@ export function stackedBars(data, { height = 190 } = {}) {
           width: bw,
           height: ah,
           rx: 6,
-          fill: "var(--accent)",
+          fill: "var(--ink-black)",
           opacity: 1,
         }),
         svg(
@@ -225,7 +225,7 @@ export function donut(data, { size = 168, thickness = 22, center = "" } = {}) {
           "text-anchor": "middle",
           fill: "var(--text-primary)",
           "font-size": "22",
-          "font-weight": "600",
+          "font-weight": "400",
         },
         center,
       ),

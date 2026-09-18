@@ -4,45 +4,41 @@
    ============================================================ */
 
 :root {
-  /* --- Paleta base --------------------------------------- */
+  /* --- Paleta base · monocroma --------------------------- */
   --ink-black: #0d1b1e;
   --platinum: #efefef;
-  --dusty-mauve: #a54657;
-  --tropical-teal: #48a9a6;
-  --coral-glow: #ff8552;
   --white: #ffffff;
 
   --ink-black-rgb: 13, 27, 30;
   --platinum-rgb: 239, 239, 239;
-  --dusty-mauve-rgb: 165, 70, 87;
-  --tropical-teal-rgb: 72, 169, 166;
-  --coral-glow-rgb: 255, 133, 82;
   --white-rgb: 255, 255, 255;
 
-  /* Sombras derivadas para texto legible sobre fondo claro */
-  --mauve-deep: #8b3849;
-  --teal-deep: #2c7a77;
-  --coral-deep: #c2542a;
+  /* Escala de grises derivada del Ink Black */
+  --gray-800: #232c2f;
+  --gray-600: #4f5759;
+  --gray-400: #8b9294;
+  --gray-300: #b7bcbd;
+  --gray-200: #d9dcdc;
 
   /* --- Semántica ----------------------------------------- */
   --bg-base: var(--platinum);
   --bg-deep: var(--ink-black);
-  --accent: var(--dusty-mauve);
-  --accent-rgb: var(--dusty-mauve-rgb);
-  --accent-deep: var(--mauve-deep);
-  --ok: var(--tropical-teal);
-  --ok-rgb: var(--tropical-teal-rgb);
-  --ok-deep: var(--teal-deep);
-  --alert: var(--coral-glow);
-  --alert-rgb: var(--coral-glow-rgb);
-  --alert-deep: var(--coral-deep);
+  --accent: var(--ink-black);
+  --accent-rgb: var(--ink-black-rgb);
+  --accent-deep: var(--ink-black);
+  --ok: var(--gray-400);
+  --ok-rgb: var(--ink-black-rgb);
+  --ok-deep: var(--gray-600);
+  --alert: var(--ink-black);
+  --alert-rgb: var(--ink-black-rgb);
+  --alert-deep: var(--ink-black);
 
   --ink-rgb: var(--ink-black-rgb);
   --text-primary: var(--ink-black);
   --text-secondary: rgba(var(--ink-rgb), 0.66);
   --text-muted: rgba(var(--ink-rgb), 0.45);
   --text-on-accent: #ffffff;
-  --text-on-dark: var(--platinum);
+  --text-on-dark: var(--white);
 
   /* --- Superficies de vidrio ------------------------------ */
   --glass-1: rgba(var(--white-rgb), 0.62);
@@ -77,7 +73,7 @@
   --shadow-sm: 0 1px 2px rgba(var(--ink-rgb), 0.06), 0 2px 8px rgba(var(--ink-rgb), 0.05);
   --shadow-md: 0 10px 30px rgba(var(--ink-rgb), 0.1);
   --shadow-lg: 0 26px 70px rgba(var(--ink-rgb), 0.12);
-  --shadow-accent: 0 2px 8px rgba(var(--accent-rgb), 0.3);
+  --shadow-accent: 0 2px 8px rgba(var(--ink-rgb), 0.18);
 
   /* --- Espaciado ----------------------------------------- */
   --sp-1: 4px;
@@ -89,9 +85,12 @@
   --sp-7: 40px;
 
   /* --- Tipografía ---------------------------------------- */
-  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
-    "Helvetica Neue", Inter, system-ui, sans-serif;
+  --font-ui: "SF Pro Display", "SF Pro Text", "SF Pro", -apple-system,
+    BlinkMacSystemFont, "Helvetica Neue", Inter, system-ui, sans-serif;
   --font-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-brand: "Space Grotesk", var(--font-ui);
+  --fw-light: 300;
+  --fw-regular: 400;
 
   /* --- Movimiento ---------------------------------------- */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);

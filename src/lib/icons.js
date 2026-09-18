@@ -2,6 +2,10 @@ import { svg } from "./dom.js";
 
 /* Trazos ligeros tipo SF Symbols · viewBox 24x24 */
 const PATHS = {
+  maio: [
+    "M7.5 4.5h9a4.5 4.5 0 0 1 4.5 4.5v4.5a4.5 4.5 0 0 1-4.5 4.5H11l-4.5 3.5 1.25-3.5A4.5 4.5 0 0 1 3 13.5V9a4.5 4.5 0 0 1 4.5-4.5Z",
+    "M7.75 13q1.375-3.75 2.75 0 1.375 3.75 2.75 0 1.375-3.75 2.75 0",
+  ],
   home: ["M4 11.2 12 4.5l8 6.7", "M6.4 9.6V19a1 1 0 0 0 1 1h9.2a1 1 0 0 0 1-1V9.6", "M10 20v-5.2h4V20"],
   phone: [
     "M6.2 3.8h3l1.4 3.6-2 1.4a12 12 0 0 0 5.6 5.6l1.4-2 3.6 1.4v3a1.6 1.6 0 0 1-1.8 1.6C10.6 18 6 13.4 4.6 5.6A1.6 1.6 0 0 1 6.2 3.8Z",
@@ -73,7 +77,7 @@ export function icon(name, cls = "nav__icon") {
       viewBox: "0 0 24 24",
       fill: "none",
       stroke: "currentColor",
-      "stroke-width": "1.5",
+      "stroke-width": name === "maio" ? "1.8" : "1.5",
       "stroke-linecap": "round",
       "stroke-linejoin": "round",
       "aria-hidden": "true",

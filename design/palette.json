@@ -1,13 +1,14 @@
 {
   "name": "Aurea Health — Core Palette",
-  "version": "2.0.0",
+  "version": "3.0.0",
+  "mode": "monocromo",
   "colors": [
     {
       "token": "ink-black",
       "name": "Ink Black",
       "hex": "#0D1B1E",
       "rgb": [13, 27, 30],
-      "role": "Texto principal, avatares, bordes y sombras"
+      "role": "Texto, acento principal, botones sólidos, gráficos y avatares"
     },
     {
       "token": "platinum",
@@ -17,27 +18,6 @@
       "role": "Base de la interfaz junto al blanco"
     },
     {
-      "token": "dusty-mauve",
-      "name": "Dusty Mauve",
-      "hex": "#A54657",
-      "rgb": [165, 70, 87],
-      "role": "Color principal: elementos destacados, activos y acciones primarias"
-    },
-    {
-      "token": "tropical-teal",
-      "name": "Tropical Teal",
-      "hex": "#48A9A6",
-      "rgb": [72, 169, 166],
-      "role": "Detalle: estados correctos, agentes en línea, huecos libres"
-    },
-    {
-      "token": "coral-glow",
-      "name": "Coral Glow",
-      "hex": "#FF8552",
-      "rgb": [255, 133, 82],
-      "role": "Detalle: alertas, urgencias y escalados"
-    },
-    {
       "token": "white",
       "name": "White",
       "hex": "#FFFFFF",
@@ -45,24 +25,16 @@
       "role": "Superficies de tarjeta y paneles de vidrio"
     }
   ],
-  "derived": [
-    {
-      "token": "mauve-deep",
-      "hex": "#8B3849",
-      "from": "dusty-mauve",
-      "role": "Texto y degradados sobre fondo claro"
-    },
-    {
-      "token": "teal-deep",
-      "hex": "#2C7A77",
-      "from": "tropical-teal",
-      "role": "Texto legible en estados correctos"
-    },
-    {
-      "token": "coral-deep",
-      "hex": "#C2542A",
-      "from": "coral-glow",
-      "role": "Texto legible en alertas"
-    }
+  "grays": [
+    { "token": "gray-800", "hex": "#232C2F", "role": "Degradados de botones y avatares" },
+    { "token": "gray-600", "hex": "#4F5759", "role": "Series secundarias en gráficos" },
+    { "token": "gray-400", "hex": "#8B9294", "role": "Series terciarias, estados correctos" },
+    { "token": "gray-300", "hex": "#B7BCBD", "role": "Barras neutras y puntos de línea de tiempo" },
+    { "token": "gray-200", "hex": "#D9DCDC", "role": "Series de menor peso" }
+  ],
+  "reserved": [
+    { "token": "dusty-mauve", "hex": "#A54657", "note": "Fuera de uso: la interfaz es monocroma" },
+    { "token": "tropical-teal", "hex": "#48A9A6", "note": "Fuera de uso: la interfaz es monocroma" },
+    { "token": "coral-glow", "hex": "#FF8552", "note": "Fuera de uso: la interfaz es monocroma" }
   ]
 }

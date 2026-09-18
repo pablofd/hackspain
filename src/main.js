@@ -2,35 +2,19 @@ import { el, mount } from "./lib/dom.js";
 import { icon } from "./lib/icons.js";
 import { clinic } from "./data/mock.js";
 
-import * as dashboard from "./views/dashboard.js";
+import * as home from "./views/home.js";
 import * as calls from "./views/calls.js";
 import * as agents from "./views/agents.js";
-import * as appointments from "./views/appointments.js";
 import * as clients from "./views/clients.js";
-import * as actions from "./views/actions.js";
-import * as reports from "./views/reports.js";
-import * as knowledge from "./views/knowledge.js";
-import * as settings from "./views/settings.js";
 
 const ROUTES = {
-  "/": { view: dashboard, icon: "home", label: "Inicio" },
+  "/": { view: home, icon: "reports", label: "Inicio" },
   "/llamadas": { view: calls, icon: "phone", label: "Llamadas", badge: "12" },
   "/agentes": { view: agents, icon: "agents", label: "Agentes" },
-  "/agenda": { view: appointments, icon: "calendar", label: "Agenda" },
   "/clientes": { view: clients, icon: "clients", label: "Clientes" },
-  "/acciones": { view: actions, icon: "actions", label: "Acciones" },
-  "/reportes": { view: reports, icon: "reports", label: "Reportes" },
-  "/conocimiento": { view: knowledge, icon: "knowledge", label: "Conocimiento", badge: "3", soft: true },
-  "/ajustes": { view: settings, icon: "settings", label: "Ajustes" },
 };
 
-const NAV = [
-  { label: "General", items: ["/"] },
-  { label: "Operación", items: ["/llamadas", "/agentes", "/agenda", "/clientes"] },
-  { label: "Automatización", items: ["/acciones", "/conocimiento"] },
-  { label: "Análisis", items: ["/reportes"] },
-  { label: "Cuenta", items: ["/ajustes"] },
-];
+const NAV = [{ label: "Plataforma", items: ["/", "/llamadas", "/agentes", "/clientes"] }];
 
 const contentHost = el("div", { class: "content", id: "content" });
 const titleNode = el("h1", { class: "topbar__title" });
@@ -47,7 +31,7 @@ function renderRoute() {
   const route = ROUTES[path];
   titleNode.textContent = route.view.meta.title;
   subNode.textContent = route.view.meta.sub;
-  document.title = `${route.view.meta.title} · Aurea Health`;
+  document.title = `${route.view.meta.title} · maio`;
   mount(contentHost, route.view.render());
   contentHost.scrollTop = 0;
   navLinks.forEach((link, key) => link.classList.toggle("is-active", key === path));
@@ -61,13 +45,8 @@ function sidebar() {
     el(
       "div",
       { class: "brand" },
-      el("span", { class: "brand__mark grain" }, icon("waveform", "nav__icon")),
-      el(
-        "div",
-        {},
-        el("div", { class: "brand__name" }, "Aurea Health"),
-        el("div", { class: "brand__sub" }, `${clinic.name} · ${clinic.plan}`),
-      ),
+      icon("maio", "brand__mark"),
+      el("div", { class: "brand__name" }, "maio"),
     ),
     el(
       "nav",
