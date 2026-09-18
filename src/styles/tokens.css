@@ -1,0 +1,83 @@
+/* ============================================================
+   Aurea Health · Design tokens
+   Paleta canónica: /design/palette.json
+   ============================================================ */
+
+:root {
+  /* --- Paleta base --------------------------------------- */
+  --charcoal: #565656;
+  --light-green: #b2ffa9;
+  --blazing-flame: #ff4a1c;
+  --coffee-bean: #81523f;
+  --deep-mocha: #3f2a2b;
+
+  --charcoal-rgb: 86, 86, 86;
+  --light-green-rgb: 178, 255, 169;
+  --blazing-flame-rgb: 255, 74, 28;
+  --coffee-bean-rgb: 129, 82, 63;
+  --deep-mocha-rgb: 63, 42, 43;
+
+  /* --- Semántica ----------------------------------------- */
+  --bg-base: #1c1314;
+  --bg-deep: var(--deep-mocha);
+  --accent: var(--light-green);
+  --accent-ink: #123b0f;
+  --danger: var(--blazing-flame);
+  --warm: var(--coffee-bean);
+
+  --text-primary: #f6efe9;
+  --text-secondary: rgba(246, 239, 233, 0.66);
+  --text-muted: rgba(246, 239, 233, 0.42);
+  --text-on-accent: #10300d;
+
+  /* --- Superficies de vidrio ------------------------------ */
+  --glass-1: rgba(246, 239, 233, 0.055);
+  --glass-2: rgba(246, 239, 233, 0.085);
+  --glass-3: rgba(246, 239, 233, 0.12);
+  --glass-warm: rgba(var(--coffee-bean-rgb), 0.24);
+  --stroke-soft: rgba(246, 239, 233, 0.09);
+  --stroke-strong: rgba(246, 239, 233, 0.16);
+  --blur-sm: saturate(160%) blur(14px);
+  --blur-md: saturate(170%) blur(28px);
+  --blur-lg: saturate(180%) blur(48px);
+
+  /* --- Radios (estilo Apple, continuos y generosos) ------- */
+  --r-xs: 10px;
+  --r-sm: 14px;
+  --r-md: 20px;
+  --r-lg: 28px;
+  --r-xl: 36px;
+  --r-pill: 999px;
+
+  /* --- Sombras ------------------------------------------- */
+  --shadow-sm: 0 2px 10px rgba(12, 6, 6, 0.28);
+  --shadow-md: 0 18px 44px rgba(12, 6, 6, 0.38);
+  --shadow-lg: 0 34px 90px rgba(12, 6, 6, 0.52);
+  --shadow-accent: 0 12px 34px rgba(var(--light-green-rgb), 0.22);
+
+  /* --- Espaciado ----------------------------------------- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 22px;
+  --sp-6: 28px;
+  --sp-7: 40px;
+
+  /* --- Tipografía ---------------------------------------- */
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+    "Helvetica Neue", Inter, system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* --- Movimiento ---------------------------------------- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 140ms;
+  --dur: 260ms;
+  --dur-slow: 520ms;
+
+  /* --- Grano (film grain procedural en SVG) --------------- */
+  --grain-fine: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.92' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+  --grain-coarse: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.42' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)'/%3E%3C/svg%3E");
+  --grain-opacity: 0.2;
+}

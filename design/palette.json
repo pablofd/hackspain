@@ -1,0 +1,41 @@
+{
+  "name": "Aurea Health — Core Palette",
+  "version": "1.0.0",
+  "colors": [
+    {
+      "token": "charcoal",
+      "name": "Charcoal",
+      "hex": "#565656",
+      "rgb": [86, 86, 86],
+      "role": "Texto secundario, bordes neutros, superficies apagadas"
+    },
+    {
+      "token": "light-green",
+      "name": "Light Green",
+      "hex": "#B2FFA9",
+      "rgb": [178, 255, 169],
+      "role": "Acento principal: estados activos, éxito, agentes en línea"
+    },
+    {
+      "token": "blazing-flame",
+      "name": "Blazing Flame",
+      "hex": "#FF4A1C",
+      "rgb": [255, 74, 28],
+      "role": "Acciones críticas, urgencias clínicas, escalado a humano"
+    },
+    {
+      "token": "coffee-bean",
+      "name": "Coffee Bean",
+      "hex": "#81523F",
+      "rgb": [129, 82, 63],
+      "role": "Superficies elevadas cálidas, hover, separadores"
+    },
+    {
+      "token": "deep-mocha",
+      "name": "Deep Mocha",
+      "hex": "#3F2A2B",
+      "rgb": [63, 42, 43],
+      "role": "Fondo base de la aplicación, sombras profundas"
+    }
+  ]
+}
