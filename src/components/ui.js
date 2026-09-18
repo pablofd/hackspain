@@ -68,7 +68,7 @@ export function sparkline(values, color = "var(--dusty-denim)") {
       svg(
         "linearGradient",
         { id, x1: "0", y1: "0", x2: "0", y2: "1" },
-        svg("stop", { offset: "0%", "stop-color": color, "stop-opacity": "0.28" }),
+        svg("stop", { offset: "0%", "stop-color": color, "stop-opacity": "0.2" }),
         svg("stop", { offset: "100%", "stop-color": color, "stop-opacity": "0" }),
       ),
     ),
@@ -77,7 +77,7 @@ export function sparkline(values, color = "var(--dusty-denim)") {
       d: line,
       fill: "none",
       stroke: color,
-      "stroke-width": "1.8",
+      "stroke-width": "1.4",
       "stroke-linecap": "round",
       "stroke-linejoin": "round",
       "vector-effect": "non-scaling-stroke",
@@ -85,38 +85,38 @@ export function sparkline(values, color = "var(--dusty-denim)") {
   );
 }
 
+/* Las barras se desvanecen hacia el fondo en lugar de cerrar con una línea base */
+function fadeGradient(id, color, from = 0.85, to = 0.04) {
+  return svg(
+    "linearGradient",
+    { id, x1: "0", y1: "0", x2: "0", y2: "1" },
+    svg("stop", { offset: "0%", "stop-color": color, "stop-opacity": String(from) }),
+    svg("stop", { offset: "62%", "stop-color": color, "stop-opacity": String((from + to) / 2.6) }),
+    svg("stop", { offset: "100%", "stop-color": color, "stop-opacity": String(to) }),
+  );
+}
+
+const uid = () => Math.random().toString(36).slice(2, 8);
+
 export function barChart(data, { height = 190, color = "var(--pitch-black)" } = {}) {
   const w = 620;
   const max = Math.max(...data.map((d) => d.value));
-  const gap = 14;
-  const bw = (w - gap * (data.length - 1)) / data.length;
+  const gap = 20;
+  const slot = (w - gap * (data.length - 1)) / data.length;
+  const bw = Math.min(slot, 30);
+  const pad = (slot - bw) / 2;
+  const id = `bc-${uid()}`;
   return svg(
     "svg",
     { class: "chart", viewBox: `0 0 ${w} ${height}`, preserveAspectRatio: "none", role: "img" },
-    ...[0.25, 0.5, 0.75, 1].map((f) =>
-      svg("line", {
-        x1: 0,
-        x2: w,
-        y1: (height - 26) * f,
-        y2: (height - 26) * f,
-        stroke: "var(--chart-grid)",
-        "stroke-width": "1",
-      }),
-    ),
+    svg("defs", {}, fadeGradient(id, color)),
     ...data.flatMap((d, i) => {
       const bh = ((d.value / max) * (height - 46)) | 0;
-      const x = i * (bw + gap);
+      const x = i * (slot + gap) + pad;
       const y = height - 26 - bh;
       return [
-        svg("rect", {
-          x,
-          y,
-          width: bw,
-          height: bh,
-          rx: 0,
-          fill: color,
-          opacity: 0.5 + (d.value / max) * 0.5,
-        }),
+        svg("rect", { x, y, width: bw, height: bh, fill: `url(#${id})` }),
+        svg("rect", { x, y, width: bw, height: 1.5, fill: color, opacity: 0.85 }),
         svg(
           "text",
           {
@@ -136,36 +136,32 @@ export function barChart(data, { height = 190, color = "var(--pitch-black)" } = 
 
 export function stackedBars(data, { height = 190 } = {}) {
   const w = 620;
-  const gap = 18;
-  const bw = (w - gap * (data.length - 1)) / data.length;
+  const gap = 24;
+  const slot = (w - gap * (data.length - 1)) / data.length;
+  const bw = Math.min(slot, 34);
+  const pad = (slot - bw) / 2;
   const usable = height - 46;
+  const inkId = `sa-${uid()}`;
+  const denimId = `sh-${uid()}`;
   return svg(
     "svg",
     { class: "chart", viewBox: `0 0 ${w} ${height}`, preserveAspectRatio: "none" },
+    svg(
+      "defs",
+      {},
+      fadeGradient(inkId, "var(--pitch-black)", 0.9, 0.05),
+      fadeGradient(denimId, "var(--dusty-denim)", 0.55, 0.18),
+    ),
     ...data.flatMap((d, i) => {
-      const x = i * (bw + gap);
+      const x = i * (slot + gap) + pad;
       const ah = (d.automated / 100) * usable;
       const hh = (d.human / 100) * usable;
       const baseY = height - 26;
       return [
-        svg("rect", {
-          x,
-          y: baseY - ah - hh,
-          width: bw,
-          height: hh,
-          rx: 0,
-          fill: "var(--dusty-denim)",
-          opacity: 1,
-        }),
-        svg("rect", {
-          x,
-          y: baseY - ah,
-          width: bw,
-          height: ah,
-          rx: 0,
-          fill: "var(--pitch-black)",
-          opacity: 1,
-        }),
+        svg("rect", { x, y: baseY - ah - hh, width: bw, height: hh, fill: `url(#${denimId})` }),
+        svg("rect", { x, y: baseY - ah - hh, width: bw, height: 1.5, fill: "var(--dusty-denim)", opacity: 0.8 }),
+        svg("rect", { x, y: baseY - ah, width: bw, height: ah, fill: `url(#${inkId})` }),
+        svg("rect", { x, y: baseY - ah, width: bw, height: 1.5, fill: "var(--pitch-black)", opacity: 0.85 }),
         svg(
           "text",
           {
@@ -182,8 +178,8 @@ export function stackedBars(data, { height = 190 } = {}) {
   );
 }
 
-export function donut(data, { size = 168, thickness = 22, center = "" } = {}) {
-  const r = size / 2 - thickness / 2;
+export function donut(data, { size = 180, thickness = 10, center = "" } = {}) {
+  const r = size / 2 - thickness / 2 - 2;
   const c = 2 * Math.PI * r;
   const total = data.reduce((s, d) => s + d.value, 0);
   let offset = 0;
@@ -196,7 +192,7 @@ export function donut(data, { size = 168, thickness = 22, center = "" } = {}) {
       fill: "none",
       stroke: d.color,
       "stroke-width": thickness,
-      "stroke-dasharray": `${len - 3} ${c - len + 3}`,
+      "stroke-dasharray": `${len - 4} ${c - len + 4}`,
       "stroke-dashoffset": -offset,
       "stroke-linecap": "butt",
       transform: `rotate(-90 ${size / 2} ${size / 2})`,
@@ -213,7 +209,7 @@ export function donut(data, { size = 168, thickness = 22, center = "" } = {}) {
       r,
       fill: "none",
       stroke: "var(--chart-track)",
-      "stroke-width": thickness,
+      "stroke-width": 1,
     }),
     ...arcs,
     center &&
@@ -221,11 +217,12 @@ export function donut(data, { size = 168, thickness = 22, center = "" } = {}) {
         "text",
         {
           x: size / 2,
-          y: size / 2 + 6,
+          y: size / 2 + 8,
           "text-anchor": "middle",
           fill: "var(--text-primary)",
-          "font-size": "22",
-          "font-weight": "400",
+          "font-size": "28",
+          "font-weight": "300",
+          "letter-spacing": "-1",
         },
         center,
       ),
