@@ -48,8 +48,8 @@ export function render() {
             ),
           ),
           el("td", { class: "mono" }, c.phone),
-          el("td", {}, c.insurer),
-          el("td", {}, el("div", { class: "chips" }, ...c.tags.map((t) => el("span", { class: "chip" }, t)))),
+          el("td", { class: "hide-md" }, c.insurer),
+          el("td", { class: "hide-lg" }, el("div", { class: "chips" }, ...c.tags.map((t) => el("span", { class: "chip" }, t)))),
           el("td", { class: "cell-sub" }, c.lastContact),
           el("td", {}, c.nextAppt),
           el("td", {}, pill(riskLabels[c.risk].text, riskLabels[c.risk].pill.replace("pill--", ""))),
@@ -155,7 +155,7 @@ export function render() {
     ),
     el(
       "div",
-      { class: "grid", style: { gridTemplateColumns: "minmax(0, 1.55fr) minmax(320px, 1fr)" } },
+      { class: "grid grid--split" },
       card(
         { flush: true },
         el(
@@ -172,8 +172,8 @@ export function render() {
                 {},
                 el("th", {}, "Paciente"),
                 el("th", {}, "Teléfono"),
-                el("th", {}, "Aseguradora"),
-                el("th", {}, "Etiquetas"),
+                el("th", { class: "hide-md" }, "Aseguradora"),
+                el("th", { class: "hide-lg" }, "Etiquetas"),
                 el("th", {}, "Último contacto"),
                 el("th", {}, "Próxima cita"),
                 el("th", {}, "Riesgo"),

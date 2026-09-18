@@ -60,9 +60,9 @@ export function render() {
           ),
           el("td", { class: "secondary" }, c.agent),
           el("td", {}, pill(outcomeLabels[c.outcome].text, outcomeLabels[c.outcome].pill.replace("pill--", ""))),
-          el("td", { class: `text-sm ${sentimentLabels[c.sentiment].cls}` }, sentimentLabels[c.sentiment].text),
+          el("td", { class: `text-sm hide-lg ${sentimentLabels[c.sentiment].cls}` }, sentimentLabels[c.sentiment].text),
           el("td", { class: "mono" }, c.duration),
-          el("td", { class: "cell-sub" }, c.time),
+          el("td", { class: "cell-sub hide-md" }, c.time),
         );
         return tr;
       }),
@@ -174,7 +174,7 @@ export function render() {
     ),
     el(
       "div",
-      { class: "grid", style: { gridTemplateColumns: "minmax(0, 1.5fr) minmax(320px, 1fr)" } },
+      { class: "grid grid--split" },
       card(
         { flush: true },
         el(
@@ -193,9 +193,9 @@ export function render() {
                 el("th", {}, "Motivo"),
                 el("th", {}, "Agente"),
                 el("th", {}, "Resultado"),
-                el("th", {}, "Sentimiento"),
+                el("th", { class: "hide-lg" }, "Sentimiento"),
                 el("th", {}, "Duración"),
-                el("th", {}, "Cuándo"),
+                el("th", { class: "hide-md" }, "Cuándo"),
               ),
             ),
             tbody,

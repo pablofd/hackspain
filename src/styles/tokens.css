@@ -62,6 +62,9 @@
   --chart-label: rgba(var(--ink-rgb), 0.5);
   --chart-track: rgba(var(--ink-rgb), 0.07);
 
+  /* --- Layout -------------------------------------------- */
+  --sidebar-w: 276px;
+
   /* --- Radios (estilo Apple, continuos y generosos) ------- */
   --r-xs: 10px;
   --r-sm: 14px;

@@ -51,6 +51,7 @@ function renderRoute() {
   mount(contentHost, route.view.render());
   contentHost.scrollTop = 0;
   navLinks.forEach((link, key) => link.classList.toggle("is-active", key === path));
+  document.body.classList.remove("nav-open");
 }
 
 function sidebar() {
@@ -131,6 +132,16 @@ function topbar() {
   return el(
     "header",
     { class: "topbar" },
+    el(
+      "button",
+      {
+        class: "btn btn--icon btn--ghost nav-toggle",
+        title: "Menú",
+        "aria-label": "Abrir menú",
+        onclick: () => document.body.classList.toggle("nav-open"),
+      },
+      icon("menu", "nav__icon"),
+    ),
     el("div", { class: "topbar__titles" }, titleNode, subNode),
     el(
       "div",
@@ -145,8 +156,22 @@ function topbar() {
 mount(
   document.getElementById("app"),
   el("div", { class: "app-bg", "aria-hidden": "true" }),
-  el("div", { class: "shell" }, sidebar(), el("main", { class: "main" }, topbar(), contentHost)),
+  el(
+    "div",
+    { class: "shell" },
+    sidebar(),
+    el("main", { class: "main" }, topbar(), contentHost),
+    el("div", {
+      class: "scrim",
+      "aria-hidden": "true",
+      onclick: () => document.body.classList.remove("nav-open"),
+    }),
+  ),
 );
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") document.body.classList.remove("nav-open");
+});
 
 window.addEventListener("hashchange", renderRoute);
 renderRoute();
