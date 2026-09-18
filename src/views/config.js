@@ -8,30 +8,79 @@ export const meta = {
   sub: "Voz, permisos, acciones y red de conversaciones de maio",
 };
 
+const TABS = [
+  { id: "agente", label: "Agente" },
+  { id: "instrucciones", label: "Instrucciones" },
+  { id: "acciones", label: "Acciones" },
+  { id: "cumplimiento", label: "Cumplimiento" },
+];
+
 export function render() {
+  let tab = "agente";
+  let mapOpen = false;
+
+  const panel = el("div", { class: "stack stack--lg" });
+
+  const tabsBar = el(
+    "div",
+    { class: "segmented" },
+    ...TABS.map((t) =>
+      el(
+        "button",
+        {
+          class: t.id === tab ? "is-active" : "",
+          onclick: () => {
+            tab = t.id;
+            mapOpen = false;
+            paint();
+          },
+        },
+        t.label,
+      ),
+    ),
+  );
+
   const mapBtn = el(
     "button",
-    { class: "btn", onclick: () => openMap(mapBtn) },
+    {
+      class: "btn",
+      onclick: () => {
+        mapOpen = !mapOpen;
+        paint();
+      },
+    },
     icon("relations", "nav__icon"),
     el("span", {}, "Ver mapa"),
   );
 
+  function paint() {
+    tabsBar.querySelectorAll("button").forEach((b, i) => {
+      b.classList.toggle("is-active", !mapOpen && TABS[i].id === tab);
+    });
+    mapBtn.classList.toggle("btn--primary", mapOpen);
+    mapBtn.lastChild.textContent = mapOpen ? "Ocultar mapa" : "Ver mapa";
+    mount(panel, mapOpen ? mapPanel() : el("div", { class: "stack stack--lg" }, ...tabContent(tab)));
+  }
+
+  paint();
+
   return el(
     "div",
     { class: "view" },
-    el(
-      "div",
-      { class: "row row--wrap" },
-      el(
-        "div",
-        { class: "segmented" },
-        el("button", { class: "is-active" }, "Agente"),
-        el("button", {}, "Acciones"),
-        el("button", {}, "Cumplimiento"),
-      ),
-      mapBtn,
-    ),
+    el("div", { class: "row row--wrap" }, tabsBar, mapBtn),
+    panel,
+  );
+}
 
+function tabContent(tab) {
+  if (tab === "instrucciones") return instructionsTab();
+  if (tab === "acciones") return actionsTab();
+  if (tab === "cumplimiento") return complianceTab();
+  return agentTab();
+}
+
+function agentTab() {
+  return [
     el(
       "div",
       { class: "grid grid--main" },
@@ -41,16 +90,16 @@ export function render() {
         field("Clínica", el("input", { class: "input", value: agentProfile.clinic })),
         field(
           "Voz",
-          el(
-            "select",
-            { class: "select" },
-            ...agentProfile.voices.map((v) => el("option", {}, v)),
-          ),
+          el("select", { class: "select" }, ...agentProfile.voices.map((v) => el("option", {}, v))),
         ),
         field("Idiomas", el("input", { class: "input", value: agentProfile.languages })),
         field(
           "Saludo",
-          el("textarea", { class: "textarea", style: { minHeight: "84px", fontFamily: "var(--font-ui)", fontSize: "13px" } }, agentProfile.greeting),
+          el(
+            "textarea",
+            { class: "textarea", style: { minHeight: "84px", fontFamily: "var(--font-ui)", fontSize: "13px" } },
+            agentProfile.greeting,
+          ),
         ),
       ),
       el(
@@ -78,59 +127,199 @@ export function render() {
         ),
       ),
     ),
+    saveBar(),
+  ];
+}
 
+function instructionsTab() {
+  const editor = el(
+    "textarea",
+    { class: "textarea", style: { minHeight: "300px" } },
+    agentProfile.instructions,
+  );
+  const counter = el("span", { class: "text-sm muted" }, `${agentProfile.instructions.length} caracteres`);
+  editor.addEventListener("input", () => {
+    counter.textContent = `${editor.value.length} caracteres`;
+  });
+
+  return [
     el(
       "div",
       { class: "grid grid--main" },
       card(
-        { title: "Acciones habilitadas", sub: "Lo que maio puede ejecutar sin supervisión" },
+        {
+          title: "Instrucciones del agente",
+          sub: "Define cómo se comporta maio en cada llamada",
+          actions: el("button", { class: "btn btn--sm btn--ghost" }, "Restaurar"),
+        },
+        editor,
         el(
           "div",
-          {},
-          ...agentProfile.skills.map(([name, desc, on]) =>
-            el(
-              "div",
-              { class: "toggle-row" },
-              el(
-                "div",
-                { class: "toggle-row__body" },
-                el("div", { class: "toggle-row__title" }, name),
-                el("div", { class: "toggle-row__desc" }, desc),
-              ),
-              toggle(on),
-            ),
-          ),
+          { class: "row", style: { marginTop: "12px" } },
+          counter,
+          el("span", { class: "text-sm muted ml-auto" }, "Se aplica a la siguiente llamada"),
         ),
       ),
-      card(
-        { title: "Barandillas", sub: "Se aplican antes de cada acción" },
-        el(
-          "div",
-          {},
-          ...agentProfile.guardrails.map(([name, desc, on]) =>
-            el(
-              "div",
-              { class: "toggle-row" },
-              el(
-                "div",
-                { class: "toggle-row__body" },
-                el("div", { class: "toggle-row__title" }, name),
-                el("div", { class: "toggle-row__desc" }, desc),
-              ),
-              toggle(on),
+      el(
+        "div",
+        { class: "stack stack--lg" },
+        card(
+          { title: "Tono" },
+          choice("Registro", ["Cálido", "Neutro", "Formal"], 0),
+          choice("Tratamiento", ["Usted", "Tú"], 0),
+          choice("Longitud", ["Breve", "Media", "Detallada"], 0),
+        ),
+        card(
+          { title: "Frases prohibidas", sub: "maio nunca las dirá" },
+          el(
+            "div",
+            { class: "chips" },
+            ...["diagnóstico", "receta", "no se preocupe", "seguro que no es nada"].map((t) =>
+              el("span", { class: "chip" }, t),
             ),
+            el("button", { class: "btn btn--sm btn--ghost" }, "Añadir"),
           ),
         ),
       ),
     ),
+    saveBar(),
+  ];
+}
 
+function actionsTab() {
+  return [
+    card(
+      { title: "Acciones habilitadas", sub: "Lo que maio puede ejecutar sin supervisión" },
+      el(
+        "div",
+        {},
+        ...agentProfile.skills.map(([name, desc, on]) => toggleRow(name, desc, on)),
+      ),
+    ),
+    card(
+      { title: "Sistemas conectados", sub: "Dónde escribe maio cuando ejecuta una acción" },
+      el(
+        "div",
+        { class: "list" },
+        ...[
+          ["Doctoralia", "Agenda y profesionales", "Operativo", "ok"],
+          ["HIS · HL7 FHIR", "Historia clínica", "Operativo", "ok"],
+          ["Adeslas API", "Coberturas y autorizaciones", "Latencia alta", "alert"],
+          ["Twilio Voice", "Telefonía SIP", "Operativo", "ok"],
+          ["Stripe", "Cobros", "Desconectado", "neutral"],
+        ].map(([n, d, label, tone]) =>
+          el(
+            "div",
+            { class: "list__item" },
+            el(
+              "div",
+              { class: "list__body" },
+              el("div", { class: "list__title" }, n),
+              el("div", { class: "list__meta" }, d),
+            ),
+            pill(label, tone),
+          ),
+        ),
+      ),
+    ),
+    saveBar(),
+  ];
+}
+
+function complianceTab() {
+  return [
+    card(
+      { title: "Barandillas", sub: "Se aplican antes de cada acción" },
+      el(
+        "div",
+        {},
+        ...agentProfile.guardrails.map(([name, desc, on]) => toggleRow(name, desc, on)),
+      ),
+    ),
     el(
       "div",
-      { class: "row row--wrap" },
-      el("button", { class: "btn btn--primary" }, "Guardar cambios"),
-      el("button", { class: "btn" }, "Probar voz"),
-      el("div", { class: "ml-auto" }, pill("Última edición hoy 08:12", "ok")),
+      { class: "grid grid--2" },
+      card(
+        { title: "Datos y retención" },
+        field(
+          "Retención de audio",
+          el(
+            "select",
+            { class: "select" },
+            el("option", {}, "30 días"),
+            el("option", { selected: true }, "90 días"),
+            el("option", {}, "1 año"),
+          ),
+        ),
+        field(
+          "Residencia de datos",
+          el("select", { class: "select" }, el("option", {}, "Unión Europea"), el("option", {}, "España")),
+        ),
+        field("Responsable del tratamiento", el("input", { class: "input", value: "Clínica Vera Salud, S.L." })),
+      ),
+      card(
+        { title: "Estado de cumplimiento", tint: "ok" },
+        el(
+          "dl",
+          { class: "kv" },
+          el("dt", {}, "Aviso de IA"),
+          el("dd", {}, "100% de llamadas"),
+          el("dt", {}, "Consentimiento"),
+          el("dd", {}, "99,4% registrado"),
+          el("dt", {}, "Cifrado"),
+          el("dd", {}, "AES-256 en reposo"),
+          el("dt", {}, "Incidencias"),
+          el("dd", {}, "0 abiertas"),
+        ),
+      ),
     ),
+    saveBar(),
+  ];
+}
+
+function toggleRow(name, desc, on) {
+  return el(
+    "div",
+    { class: "toggle-row" },
+    el(
+      "div",
+      { class: "toggle-row__body" },
+      el("div", { class: "toggle-row__title" }, name),
+      el("div", { class: "toggle-row__desc" }, desc),
+    ),
+    toggle(on),
+  );
+}
+
+/* Selector en línea con una sola opción activa */
+function choice(label, options, activeIndex) {
+  const group = el(
+    "div",
+    { class: "segmented" },
+    ...options.map((o, i) =>
+      el(
+        "button",
+        {
+          class: i === activeIndex ? "is-active" : "",
+          onclick: (e) => {
+            group.querySelectorAll("button").forEach((b) => b.classList.remove("is-active"));
+            e.currentTarget.classList.add("is-active");
+          },
+        },
+        o,
+      ),
+    ),
+  );
+  return el("div", { class: "field" }, el("label", {}, label), group);
+}
+
+function saveBar() {
+  return el(
+    "div",
+    { class: "row row--wrap" },
+    el("button", { class: "btn btn--primary" }, "Guardar cambios"),
+    el("button", { class: "btn" }, "Probar voz"),
+    el("div", { class: "ml-auto" }, pill("Última edición hoy 08:12", "ok")),
   );
 }
 
@@ -143,7 +332,7 @@ function metric(label, value) {
 }
 
 /* ============================================================
-   Mapa de relaciones a pantalla completa
+   Mapa de relaciones
    ============================================================ */
 
 function people() {
@@ -157,7 +346,7 @@ function people() {
   return [...byCaller.values()];
 }
 
-function openMap(btn) {
+function mapPanel() {
   const host = el("div", { class: "map-full" });
   const nodes = people();
   let zoom = 1;
@@ -173,22 +362,6 @@ function openMap(btn) {
     zoom = Math.min(2.2, Math.max(0.6, Number(next.toFixed(2))));
     paint();
   }
-
-  function close() {
-    host.remove();
-    document.removeEventListener("keydown", onKey);
-    btn.classList.remove("btn--primary");
-  }
-
-  function onKey(e) {
-    if (e.key === "Escape") close();
-    if (e.key === "+" || e.key === "=") setZoom(zoom + 0.2);
-    if (e.key === "-") setZoom(zoom - 0.2);
-  }
-
-  document.addEventListener("keydown", onKey);
-  btn.classList.add("btn--primary");
-  document.body.append(host);
 
   mount(
     host,
@@ -209,7 +382,6 @@ function openMap(btn) {
         zoomLabel,
         el("button", { class: "btn btn--icon", onclick: () => setZoom(zoom + 0.2), title: "Ampliar" }, "+"),
         el("button", { class: "btn btn--sm", onclick: () => setZoom(1) }, "Ajustar"),
-        el("button", { class: "btn btn--icon btn--ghost", onclick: close, "aria-label": "Cerrar" }, "✕"),
       ),
     ),
     stage,
@@ -228,6 +400,7 @@ function openMap(btn) {
   });
 
   paint();
+  return host;
 }
 
 function graph(nodes, zoom) {
