@@ -22,6 +22,28 @@ export function render() {
     "div",
     { class: "view" },
     el(
+      "section",
+      { class: "hero" },
+      el("div", { class: "hero__art" }),
+      el(
+        "div",
+        { class: "hero__body" },
+        el("p", { class: "hero__eyebrow" }, "Recepción agéntica"),
+        el("h2", { class: "hero__title" }, "Bienvenido a maio, Vicente"),
+        el(
+          "p",
+          { class: "hero__text" },
+          "Tus tres agentes llevan 342 llamadas atendidas hoy y han resuelto el 87% sin intervención humana. Nadie se ha quedado esperando al teléfono.",
+        ),
+        el(
+          "div",
+          { class: "row row--wrap" },
+          el("a", { class: "btn btn--primary", href: "#/llamadas" }, icon("phone", "nav__icon"), "Ver llamadas de hoy"),
+          el("a", { class: "btn", href: "#/agentes" }, icon("agents", "nav__icon"), "Configurar agentes"),
+        ),
+      ),
+    ),
+    el(
       "div",
       { class: "row row--wrap" },
       el(
