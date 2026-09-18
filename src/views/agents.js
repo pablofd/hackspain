@@ -1,7 +1,8 @@
-import { el } from "../lib/dom.js";
-import { pill, toggle } from "../components/ui.js";
+import { el, mount, svg } from "../lib/dom.js";
+import { icon } from "../lib/icons.js";
+import { card, pill, toggle } from "../components/ui.js";
 import { openDrawer } from "../components/drawer.js";
-import { agents, statusLabels } from "../data/mock.js";
+import { agents, calls, statusLabels } from "../data/mock.js";
 
 export const meta = {
   title: "Agentes",
@@ -9,6 +10,64 @@ export const meta = {
 };
 
 export function render() {
+  let mapOpen = false;
+  let focused = agents[0];
+
+  const board = el("div", { class: "grid grid--3 grid--agents" });
+  const mapHost = el("aside", { class: "map", hidden: true });
+
+  function renderBoard() {
+    if (mapOpen) mount(board, agentList(), mapHost);
+    else mount(board, ...agents.map(agentCard));
+    board.classList.toggle("is-map", mapOpen);
+    board.classList.toggle("grid--3", !mapOpen);
+    mapHost.hidden = !mapOpen;
+    if (mapOpen) mount(mapHost, mapPanel(focused));
+  }
+
+  function agentList() {
+    return card(
+      { flush: true },
+      ...agents.map((a) =>
+        el(
+          "button",
+          {
+            class: `agent-row${a.id === focused.id ? " is-active" : ""}`,
+            onclick: () => {
+              focused = a;
+              renderBoard();
+            },
+          },
+          el("span", { class: "avatar" }, a.name[0]),
+          el(
+            "span",
+            { style: { minWidth: 0 } },
+            el("span", { class: "agent-row__name", style: { display: "block" } }, a.name),
+            el("span", { class: "agent-row__meta truncate", style: { display: "block" } }, a.role),
+          ),
+          el("span", { class: "agent-row__count" }, `${graphFor(a).length} pacientes`),
+        ),
+      ),
+    );
+  }
+
+  const mapBtn = el(
+    "button",
+    {
+      class: "btn",
+      onclick: () => {
+        mapOpen = !mapOpen;
+        mapBtn.classList.toggle("btn--primary", mapOpen);
+        mapBtn.lastChild.textContent = mapOpen ? "Ocultar mapa" : "Ver mapa";
+        renderBoard();
+      },
+    },
+    icon("relations", "nav__icon"),
+    el("span", {}, "Ver mapa"),
+  );
+
+  renderBoard();
+
   return el(
     "div",
     { class: "view" },
@@ -23,8 +82,9 @@ export function render() {
         el("button", {}, "En pausa"),
         el("button", {}, "Borradores"),
       ),
+      mapBtn,
     ),
-    el("div", { class: "grid grid--3" }, ...agents.map(agentCard)),
+    board,
   );
 }
 
@@ -169,4 +229,138 @@ function field(label, control) {
 
 function metric(label, value) {
   return el("div", { class: "agent-card__metric" }, el("span", {}, label), el("strong", {}, String(value)));
+}
+
+/* Pacientes con los que ha hablado el agente, agregados por persona */
+function graphFor(a) {
+  const byCaller = new Map();
+  for (const c of calls) {
+    if (c.agent !== a.name) continue;
+    const e = byCaller.get(c.caller) || { name: c.caller, count: 0, escalated: false, reason: c.reason };
+    e.count += 1;
+    e.escalated = e.escalated || c.outcome === "escalated";
+    byCaller.set(c.caller, e);
+  }
+  return [...byCaller.values()];
+}
+
+function mapPanel(a) {
+  const nodes = graphFor(a);
+  const totalCalls = nodes.reduce((s, n) => s + n.count, 0);
+  return card(
+    {
+      title: `Red de ${a.name}`,
+      sub: nodes.length
+        ? `${nodes.length} pacientes · ${totalCalls} conversaciones`
+        : "Todavía no ha hablado con nadie",
+    },
+    nodes.length ? graph(a, nodes) : el("div", { class: "empty" }, "Sin conversaciones registradas."),
+    nodes.length &&
+      el(
+        "div",
+        { class: "map__legend" },
+        el("span", {}, "Grosor de la flecha = número de llamadas"),
+        el("span", { class: "text-alert" }, "Rojo = hubo escalado a humano"),
+      ),
+  );
+}
+
+function graph(a, nodes) {
+  const w = 560;
+  const h = 400;
+  const cx = w / 2;
+  const cy = h / 2;
+  const rx = 200;
+  const ry = 142;
+  const arrow = `arrow-${Math.random().toString(36).slice(2, 7)}`;
+  const arrowHot = `${arrow}-hot`;
+
+  const edges = [];
+  const dots = [];
+
+  nodes.forEach((n, i) => {
+    const angle = (-Math.PI / 2) + (i / nodes.length) * Math.PI * 2;
+    const x = cx + Math.cos(angle) * rx;
+    const y = cy + Math.sin(angle) * ry;
+    const from = { x: cx + Math.cos(angle) * 48, y: cy + Math.sin(angle) * 48 };
+    const to = { x: x - Math.cos(angle) * 30, y: y - Math.sin(angle) * 30 };
+    const mid = { x: (from.x + to.x) / 2 - Math.sin(angle) * 22, y: (from.y + to.y) / 2 + Math.cos(angle) * 22 };
+
+    edges.push(
+      svg("path", {
+        d: `M${from.x.toFixed(1)} ${from.y.toFixed(1)} Q${mid.x.toFixed(1)} ${mid.y.toFixed(1)} ${to.x.toFixed(1)} ${to.y.toFixed(1)}`,
+        fill: "none",
+        stroke: n.escalated ? "var(--lipstick-red)" : "var(--dusty-denim)",
+        "stroke-width": 1 + Math.min(n.count, 4) * 0.7,
+        "marker-end": `url(#${n.escalated ? arrowHot : arrow})`,
+        opacity: 0.85,
+      }),
+    );
+
+    dots.push(
+      svg(
+        "g",
+        {},
+        svg("circle", {
+          cx: x,
+          cy: y,
+          r: 21,
+          fill: "var(--white)",
+          stroke: n.escalated ? "var(--lipstick-red)" : "var(--stroke-strong)",
+          "stroke-width": 1.2,
+        }),
+        svg(
+          "text",
+          { x, y: y + 4, "text-anchor": "middle", "font-size": "12", fill: "var(--text-primary)" },
+          n.name[0],
+        ),
+        svg("text", { x, y: y + 38, "text-anchor": "middle", class: "map__node-label" }, n.name),
+        svg(
+          "text",
+          { x, y: y + 51, "text-anchor": "middle", class: "map__node-sub" },
+          `${n.count} ${n.count === 1 ? "llamada" : "llamadas"}`,
+        ),
+      ),
+    );
+  });
+
+  return svg(
+    "svg",
+    { class: "map__canvas", viewBox: `0 0 ${w} ${h}`, role: "img", "aria-label": `Red de ${a.name}` },
+    svg(
+      "defs",
+      {},
+      marker(arrow, "var(--dusty-denim)"),
+      marker(arrowHot, "var(--lipstick-red)"),
+    ),
+    ...edges,
+    svg("circle", { cx, cy, r: 46, fill: "var(--pitch-black)" }),
+    svg(
+      "text",
+      { x: cx, y: cy + 2, "text-anchor": "middle", "font-size": "20", fill: "var(--white)" },
+      a.name[0],
+    ),
+    svg(
+      "text",
+      { x: cx, y: cy + 20, "text-anchor": "middle", "font-size": "9.5", fill: "rgba(255,255,255,0.72)" },
+      a.name,
+    ),
+    ...dots,
+  );
+}
+
+function marker(id, color) {
+  return svg(
+    "marker",
+    {
+      id,
+      viewBox: "0 0 10 10",
+      refX: "9",
+      refY: "5",
+      markerWidth: "5",
+      markerHeight: "5",
+      orient: "auto-start-reverse",
+    },
+    svg("path", { d: "M0 1 L9 5 L0 9 z", fill: color }),
+  );
 }
