@@ -20,7 +20,7 @@ export function render() {
   let selected = calls[0];
   let signalsOpen = false;
 
-  const heroHost = el("div", { class: "stack stack--lg" });
+  const heroHost = el("div", { class: "calls__panel" });
   const signalsHost = el("aside", { class: "signals", hidden: true });
   const tbody = el("tbody", {});
 
@@ -79,36 +79,40 @@ export function render() {
     mount(
       heroHost,
       chatCard(c, signalsOpen, toggleSignals),
-      card(
-        { title: "Resumen de la llamada", sub: `${c.id} · ${c.direction}` },
-        el(
-          "dl",
-          { class: "kv" },
-          el("dt", {}, "Paciente"),
-          el("dd", {}, c.caller),
-          el("dt", {}, "Teléfono"),
-          el("dd", { class: "mono" }, c.phone),
-          el("dt", {}, "Agente"),
-          el("dd", {}, c.agent),
-          el("dt", {}, "Motivo"),
-          el("dd", {}, c.reason),
-          el("dt", {}, "Resultado"),
-          el("dd", {}, outcomeLabels[c.outcome].text),
-          el("dt", {}, "Sentimiento"),
-          el("dd", { class: sentimentLabels[c.sentiment].cls }, sentimentLabels[c.sentiment].text),
+      el(
+        "div",
+        { class: "grid grid--2" },
+        card(
+          { title: "Resumen de la llamada", sub: `${c.id} · ${c.direction}` },
+          el(
+            "dl",
+            { class: "kv" },
+            el("dt", {}, "Paciente"),
+            el("dd", {}, c.caller),
+            el("dt", {}, "Teléfono"),
+            el("dd", { class: "mono" }, c.phone),
+            el("dt", {}, "Agente"),
+            el("dd", {}, c.agent),
+            el("dt", {}, "Motivo"),
+            el("dd", {}, c.reason),
+            el("dt", {}, "Resultado"),
+            el("dd", {}, outcomeLabels[c.outcome].text),
+            el("dt", {}, "Sentimiento"),
+            el("dd", { class: sentimentLabels[c.sentiment].cls }, sentimentLabels[c.sentiment].text),
+          ),
         ),
-      ),
-      card(
-        { title: "Acciones ejecutadas", sub: "Registro auditable" },
-        el(
-          "div",
-          { class: "timeline" },
-          ...c.actions.map((a) =>
-            el(
-              "div",
-              { class: "timeline__item" },
-              el("div", { class: "timeline__title" }, a),
-              el("div", { class: "timeline__time" }, "Confirmado"),
+        card(
+          { title: "Acciones ejecutadas", sub: "Registro auditable" },
+          el(
+            "div",
+            { class: "timeline" },
+            ...c.actions.map((a) =>
+              el(
+                "div",
+                { class: "timeline__item" },
+                el("div", { class: "timeline__title" }, a),
+                el("div", { class: "timeline__time" }, "Confirmado"),
+              ),
             ),
           ),
         ),
@@ -331,7 +335,7 @@ export function signalsPanel(c) {
   return [
     el(
       "div",
-      { class: "signals__strip" },
+      { class: "signals__strip brand-wash" },
       el("span", { class: "dot dot--pulse" }),
       el("span", {}, `Lectura en vivo · ${c.agent}`),
       liveNumber,

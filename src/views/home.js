@@ -24,7 +24,7 @@ export function render() {
     el(
       "section",
       { class: "hero" },
-      el("div", { class: "hero__art" }),
+      el("div", { class: "hero__art brand-wash" }),
       el(
         "div",
         { class: "hero__body" },

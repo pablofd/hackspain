@@ -1,6 +1,6 @@
 import { el } from "../lib/dom.js";
-import { icon } from "../lib/icons.js";
-import { card, pill, toggle, bar } from "../components/ui.js";
+import { pill, toggle } from "../components/ui.js";
+import { openDrawer } from "../components/drawer.js";
 import { agents, statusLabels } from "../data/mock.js";
 
 export const meta = {
@@ -23,71 +23,8 @@ export function render() {
         el("button", {}, "En pausa"),
         el("button", {}, "Borradores"),
       ),
-      el("button", { class: "btn btn--primary ml-auto" }, icon("plus", "nav__icon"), "Crear agente"),
     ),
-
     el("div", { class: "grid grid--3" }, ...agents.map(agentCard)),
-
-    el(
-      "div",
-      { class: "grid grid--aside" },
-      card(
-        { title: "Plantillas", sub: "Arranca desde un rol preconfigurado", tint: "accent" },
-        el(
-          "div",
-          { class: "list" },
-          ...[
-            ["Recepción general", "Citas, horarios e información de sedes"],
-            ["Triaje clínico", "Árbol de síntomas con escalado a enfermería"],
-            ["Resultados de pruebas", "Entrega segura con verificación de identidad"],
-            ["Campaña saliente", "Revisiones anuales y recordatorios"],
-          ].map(([t, d]) =>
-            el(
-              "div",
-              { class: "list__item" },
-              el(
-                "span",
-                { class: "avatar" },
-                icon("sparkle", "nav__icon"),
-              ),
-              el(
-                "div",
-                { class: "list__body" },
-                el("div", { class: "list__title" }, t),
-                el("div", { class: "list__meta" }, d),
-              ),
-              el("button", { class: "btn btn--sm btn--ghost" }, "Usar"),
-            ),
-          ),
-        ),
-      ),
-      card(
-        { title: "Configuración rápida", sub: "Se aplica a todos los agentes activos" },
-        el(
-          "div",
-          {},
-          ...[
-            ["Grabación de llamadas", "Requerido para auditoría clínica", true],
-            ["Aviso de IA al inicio", "Informa de que habla con un asistente virtual", true],
-            ["Escalado automático", "Transfiere a humano ante banderas rojas", true],
-            ["Modo fuera de horario", "Buzón inteligente con devolución de llamada", false],
-            ["Anonimizar datos en transcripción", "Enmascara identificadores personales", true],
-          ].map(([t, d, on]) =>
-            el(
-              "div",
-              { class: "toggle-row" },
-              el(
-                "div",
-                { class: "toggle-row__body" },
-                el("div", { class: "toggle-row__title" }, t),
-                el("div", { class: "toggle-row__desc" }, d),
-              ),
-              toggle(on),
-            ),
-          ),
-        ),
-      ),
-    ),
   );
 }
 
@@ -99,7 +36,7 @@ function agentCard(a) {
     el(
       "div",
       { class: "agent-card__top" },
-      el("div", { class: `agent-card__avatar agent-card__avatar--${a.tone} grain` }, a.name[0]),
+      el("div", { class: `agent-card__avatar agent-card__avatar--${a.tone}` }, a.name[0]),
       el(
         "div",
         { style: { minWidth: "0" } },
@@ -114,36 +51,120 @@ function agentCard(a) {
     ),
     el(
       "div",
-      { class: "agent-card__metrics" },
-      metric("Llamadas", a.calls),
-      metric("Resolución", `${a.resolution}%`),
-      metric("Media", a.avgHandle),
-    ),
-    el(
-      "div",
-      { class: "stack stack--sm" },
-      el("div", { class: "section-title", style: { margin: "0" } }, "Acciones habilitadas"),
-      el("div", { class: "chips" }, ...a.skills.map((s) => el("span", { class: "chip" }, s))),
-    ),
-    el(
-      "div",
-      { class: "stack stack--sm" },
-      el(
-        "div",
-        { class: "row text-sm muted" },
-        el("span", {}, `Voz · ${a.voice}`),
-        el("span", { class: "ml-auto" }, a.language),
-      ),
-      bar(a.resolution || 4, a.status === "online" ? "" : "bar__fill--muted"),
-    ),
-    el(
-      "div",
       { class: "row" },
-      el("button", { class: "btn btn--sm" }, "Configurar"),
-      el("button", { class: "btn btn--sm btn--ghost" }, "Probar voz"),
-      el("div", { class: "ml-auto" }, toggle(a.status === "online")),
+      el("span", { class: "text-sm muted" }, a.calls ? `${a.calls} llamadas · ${a.resolution}%` : "Sin actividad"),
+      el(
+        "button",
+        { class: "btn btn--sm ml-auto", onclick: () => editAgentDrawer(a) },
+        "Editar agente",
+      ),
     ),
   );
+}
+
+function editAgentDrawer(a) {
+  openDrawer({
+    title: a.name,
+    sub: a.role,
+    body: () => [
+      el(
+        "div",
+        { class: "agent-card__metrics", style: { marginBottom: "22px", borderTop: "0", paddingTop: "0" } },
+        metric("Llamadas", a.calls),
+        metric("Resolución", `${a.resolution}%`),
+        metric("Media", a.avgHandle),
+      ),
+      field("Nombre", el("input", { class: "input", value: a.name })),
+      field("Rol", el("input", { class: "input", value: a.role })),
+      field(
+        "Voz",
+        el(
+          "select",
+          { class: "select" },
+          el("option", {}, a.voice),
+          el("option", {}, "Sofía Neural"),
+          el("option", {}, "Álvaro Neural"),
+        ),
+      ),
+      field("Idiomas", el("input", { class: "input", value: a.language })),
+      el("div", { class: "section-title" }, "Acciones habilitadas"),
+      el(
+        "div",
+        { class: "chips", style: { marginBottom: "22px" } },
+        ...a.skills.map((s) => el("span", { class: "chip" }, s)),
+        el("button", { class: "btn btn--sm btn--ghost" }, "Añadir"),
+      ),
+      el("div", { class: "section-title" }, "Canales"),
+      el(
+        "div",
+        { class: "chips", style: { marginBottom: "22px" } },
+        ...a.channels.map((s) => el("span", { class: "chip" }, s)),
+      ),
+      el("div", { class: "section-title" }, "Comportamiento"),
+      ...[
+        ["Agente activo", "Atiende llamadas entrantes", a.status === "online"],
+        ["Escalado automático", "Transfiere ante banderas rojas", true],
+        ["Grabación", "Requerido para auditoría clínica", true],
+      ].map(([t, d, on]) =>
+        el(
+          "div",
+          { class: "toggle-row" },
+          el(
+            "div",
+            { class: "toggle-row__body" },
+            el("div", { class: "toggle-row__title" }, t),
+            el("div", { class: "toggle-row__desc" }, d),
+          ),
+          toggle(on),
+        ),
+      ),
+    ],
+    footer: (close) => [
+      el("button", { class: "btn btn--primary", onclick: close }, "Guardar cambios"),
+      el("button", { class: "btn btn--ghost" }, "Probar voz"),
+      el("button", { class: "btn btn--ghost ml-auto", onclick: close }, "Cancelar"),
+    ],
+  });
+}
+
+export function openNewAgent() {
+  openDrawer({
+    title: "Nuevo agente",
+    sub: "Cuatro datos y empieza a atender",
+    body: () => [
+      field("Nombre", el("input", { class: "input", placeholder: "Nora" })),
+      field(
+        "Plantilla",
+        el(
+          "select",
+          { class: "select" },
+          el("option", {}, "Recepción general"),
+          el("option", {}, "Triaje clínico"),
+          el("option", {}, "Resultados de pruebas"),
+          el("option", {}, "Campaña saliente"),
+        ),
+      ),
+      field(
+        "Voz",
+        el(
+          "select",
+          { class: "select" },
+          el("option", {}, "Sofía Neural"),
+          el("option", {}, "Álvaro Neural"),
+          el("option", {}, "Lucía Neural"),
+        ),
+      ),
+      field("Idiomas", el("input", { class: "input", value: "Español" })),
+    ],
+    footer: (close) => [
+      el("button", { class: "btn btn--primary", onclick: close }, "Crear agente"),
+      el("button", { class: "btn btn--ghost ml-auto", onclick: close }, "Cancelar"),
+    ],
+  });
+}
+
+function field(label, control) {
+  return el("div", { class: "field" }, el("label", {}, label), control);
 }
 
 function metric(label, value) {

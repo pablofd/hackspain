@@ -127,7 +127,12 @@ function topbar() {
       { class: "topbar__actions" },
       search,
       el("button", { class: "btn btn--icon btn--ghost", title: "Notificaciones" }, icon("bell", "nav__icon")),
-      el("button", { class: "btn btn--primary" }, icon("plus", "nav__icon"), "Nuevo agente"),
+      el(
+        "button",
+        { class: "btn btn--primary", onclick: () => agents.openNewAgent() },
+        icon("plus", "nav__icon"),
+        "Nuevo agente",
+      ),
     ),
   );
 }
