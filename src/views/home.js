@@ -7,14 +7,14 @@ import {
   reasonsBreakdown,
   weeklyTrend,
   activity,
-  agents,
+  agentProfile,
   calls,
   outcomeLabels,
 } from "../data/mock.js";
 
 export const meta = {
   title: "Inicio",
-  sub: "Reportes y actividad de la recepción agéntica · hoy, 18 sep",
+  sub: "Actividad y rendimiento de maio · hoy, 18 sep",
 };
 
 export function render() {
@@ -33,13 +33,13 @@ export function render() {
         el(
           "p",
           { class: "hero__text" },
-          "Tus tres agentes llevan 342 llamadas atendidas hoy y han resuelto el 87% sin intervención humana. Nadie se ha quedado esperando al teléfono.",
+          "maio lleva 342 llamadas atendidas hoy y ha resuelto el 87% sin intervención humana. Nadie se ha quedado esperando al teléfono.",
         ),
         el(
           "div",
           { class: "row row--wrap" },
           el("a", { class: "btn btn--primary", href: "#/llamadas" }, icon("phone", "nav__icon"), "Ver llamadas de hoy"),
-          el("a", { class: "btn", href: "#/agentes" }, icon("agents", "nav__icon"), "Configurar agentes"),
+          el("a", { class: "btn", href: "#/configuracion" }, icon("settings", "nav__icon"), "Configurar maio"),
         ),
       ),
     ),
@@ -118,32 +118,34 @@ export function render() {
         { title: "Automatizado vs. humano", sub: "Porcentaje de llamadas por día de la semana" },
         stackedBars(weeklyTrend),
         legend([
-          { label: "Resuelto por agente", color: "var(--pitch-black)" },
+          { label: "Resuelto por maio", color: "var(--pitch-black)" },
           { label: "Escalado a humano", color: "var(--dusty-denim)" },
         ]),
       ),
       card(
-        { title: "Calidad por agente", sub: "Resolución en primera llamada" },
+        { title: "Resolución por motivo", sub: "En primera llamada, sin escalado" },
         el(
           "div",
           { class: "list" },
-          ...agents
-            .filter((a) => a.calls > 0)
-            .sort((a, b) => b.resolution - a.resolution)
-            .map((a) =>
+          ...[
+            ["Agendar cita", 97],
+            ["Reprogramar", 94],
+            ["Resultados", 91],
+            ["Facturación", 79],
+            ["Triaje clínico", 62],
+          ].map(([label, value]) =>
+            el(
+              "div",
+              { class: "list__item" },
               el(
                 "div",
-                { class: "list__item" },
-                el("span", { class: "avatar" }, a.name[0]),
-                el(
-                  "div",
-                  { class: "list__body" },
-                  el("div", { class: "list__title" }, a.name),
-                  el("div", { style: { marginTop: "6px" } }, bar(a.resolution)),
-                ),
-                el("span", { class: "mono" }, `${a.resolution}%`),
+                { class: "list__body" },
+                el("div", { class: "list__title" }, label),
+                el("div", { style: { marginTop: "6px" } }, bar(value)),
               ),
+              el("span", { class: "mono" }, `${value}%`),
             ),
+          ),
         ),
       ),
     ),
@@ -177,7 +179,6 @@ export function render() {
                 {},
                 el("th", {}, "Paciente"),
                 el("th", {}, "Motivo"),
-                el("th", {}, "Agente"),
                 el("th", {}, "Estado"),
                 el("th", {}, "Duración"),
               ),
@@ -196,7 +197,6 @@ export function render() {
                     el("div", { class: "cell-sub" }, c.time),
                   ),
                   el("td", {}, c.reason),
-                  el("td", { class: "secondary" }, c.agent),
                   el("td", {}, pill(outcomeLabels[c.outcome].text, outcomeLabels[c.outcome].pill.replace("pill--", ""))),
                   el("td", { class: "mono" }, c.duration),
                 ),
@@ -209,7 +209,7 @@ export function render() {
         "div",
         { class: "stack stack--lg" },
         card(
-          { title: "Actividad del sistema", sub: "Acciones ejecutadas por agentes" },
+          { title: "Actividad del sistema", sub: "Acciones ejecutadas por maio" },
           el(
             "div",
             { class: "timeline" },
@@ -225,26 +225,24 @@ export function render() {
           ),
         ),
         card(
-          { title: "Agentes en servicio", tint: "accent" },
+          { title: "maio ahora mismo", tint: "accent" },
           el(
             "div",
             { class: "list" },
-            ...agents
-              .filter((a) => a.status === "online")
-              .map((a) =>
-                el(
-                  "div",
-                  { class: "list__item" },
-                  el("span", { class: "avatar avatar--accent" }, a.name[0]),
-                  el(
-                    "div",
-                    { class: "list__body" },
-                    el("div", { class: "list__title" }, a.name),
-                    el("div", { class: "list__meta truncate" }, a.role),
-                  ),
-                  el("span", { class: "mono" }, `${a.resolution}%`),
-                ),
+            ...[
+              ["Estado", "Atendiendo"],
+              ["Llamadas en curso", "2"],
+              ["En cola", "0"],
+              ["Acciones habilitadas", `${agentProfile.skills.filter((s) => s[2]).length}`],
+              ["Canales", agentProfile.channels.join(" · ")],
+            ].map(([k, v]) =>
+              el(
+                "div",
+                { class: "list__item" },
+                el("div", { class: "list__body" }, el("div", { class: "list__title" }, k)),
+                el("span", { class: "mono" }, v),
               ),
+            ),
           ),
         ),
       ),

@@ -1,4 +1,4 @@
-/* Datos de demostración. Sustituir por la API real de agentes. */
+/* Datos de demostración. Sustituir por la API real de maio. */
 
 export const clinic = {
   name: "Clínica Vera Salud",
@@ -6,78 +6,34 @@ export const clinic = {
   user: { name: "Vicente Ferri", role: "Director de operaciones", initials: "VF" },
 };
 
-export const agents = [
-  {
-    id: "agt_ines",
-    name: "Inés",
-    role: "Recepción · Atención primaria",
-    tone: "mauve",
-    status: "online",
-    language: "ES · CA",
-    voice: "Sofía Neural",
-    calls: 412,
-    resolution: 92,
-    avgHandle: "2m 14s",
-    skills: ["Agendar cita", "Reprogramar", "Verificar seguro", "Recordatorios"],
-    channels: ["Teléfono", "WhatsApp"],
-  },
-  {
-    id: "agt_marc",
-    name: "Marc",
-    role: "Triaje telefónico",
-    tone: "coral",
-    status: "online",
-    language: "ES · EN",
-    voice: "Álvaro Neural",
-    calls: 268,
-    resolution: 84,
-    avgHandle: "3m 41s",
-    skills: ["Triaje sintomático", "Escalado a enfermería", "Protocolo urgencias"],
-    channels: ["Teléfono"],
-  },
-  {
-    id: "agt_lucia",
-    name: "Lucía",
-    role: "Resultados y seguimiento",
-    tone: "teal",
-    status: "online",
-    language: "ES",
-    voice: "Lucía Neural",
-    calls: 197,
-    resolution: 96,
-    avgHandle: "1m 52s",
-    skills: ["Entrega de resultados", "Seguimiento post-alta", "Encuesta NPS"],
-    channels: ["Teléfono", "SMS"],
-  },
-  {
-    id: "agt_dani",
-    name: "Dani",
-    role: "Facturación y mutuas",
-    tone: "teal",
-    status: "paused",
-    language: "ES",
-    voice: "Diego Neural",
-    calls: 88,
-    resolution: 79,
-    avgHandle: "4m 08s",
-    skills: ["Autorizaciones", "Presupuestos", "Cobros pendientes"],
-    channels: ["Teléfono", "Email"],
-  },
-  {
-    id: "agt_nora",
-    name: "Nora",
-    role: "Campañas de revisión",
-    tone: "mauve",
-    status: "draft",
-    language: "ES",
-    voice: "Nora Neural",
-    calls: 0,
-    resolution: 0,
-    avgHandle: "—",
-    skills: ["Llamada saliente", "Revisión anual", "Confirmación"],
-    channels: ["Teléfono"],
-  },
-];
+export const agentProfile = {
+  name: "maio",
+  clinic: "Clínica Vera Salud",
+  voices: ["Sofía Neural", "Álvaro Neural", "Lucía Neural"],
+  languages: "Español · Català · English",
+  greeting:
+    "Clínica Vera Salud, le atiende maio, el asistente virtual. ¿En qué puedo ayudarle?",
+  calls: 965,
+  resolution: 91,
+  avgHandle: "2m 24s",
+  channels: ["Teléfono", "WhatsApp", "SMS"],
+  skills: [
+    ["Agendar cita", "Crea la cita y bloquea el hueco del profesional", true],
+    ["Reprogramar o cancelar", "Mueve la cita y avisa al paciente", true],
+    ["Verificar cobertura", "Consulta póliza y copago antes de confirmar", true],
+    ["Triaje sintomático", "Aplica el árbol clínico y escala si hay bandera roja", true],
+    ["Entregar resultados", "Publica informes en el portal tras verificar identidad", true],
+    ["Cobro de pendientes", "Genera enlace de pago seguro", false],
+  ],
+  guardrails: [
+    ["Aviso de IA al inicio", "Informa de que habla con un asistente virtual", true],
+    ["Verificación de identidad", "Nombre completo y fecha de nacimiento", true],
+    ["Confirmación verbal", "El paciente confirma antes de escribir en la agenda", true],
+    ["Sin consejo clínico", "maio nunca diagnostica ni prescribe", true],
+    ["Escalado automático", "Transfiere a enfermería ante banderas rojas", true],
+    ["Registro inmutable", "Cada acción queda firmada y auditada", true],
+  ],
+};
 
 export const calls = [
   {
@@ -661,10 +617,4 @@ export const riskLabels = {
   low: { text: "Bajo", pill: "pill--ok" },
   medium: { text: "Medio", pill: "pill--accent" },
   high: { text: "Alto", pill: "pill--alert" },
-};
-
-export const statusLabels = {
-  online: { text: "En línea", pill: "pill--ok" },
-  paused: { text: "En pausa", pill: "pill--accent" },
-  draft: { text: "Borrador", pill: "pill--neutral" },
 };

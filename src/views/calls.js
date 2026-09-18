@@ -60,7 +60,6 @@ export function render() {
             el("div", { class: "cell-main" }, c.reason),
             el("div", { class: "cell-sub" }, c.direction),
           ),
-          el("td", { class: "secondary hide-md" }, c.agent),
           el("td", {}, pill(outcomeLabels[c.outcome].text, outcomeLabels[c.outcome].pill.replace("pill--", ""))),
           el("td", { class: `text-sm hide-lg ${sentimentLabels[c.sentiment].cls}` }, sentimentLabels[c.sentiment].text),
           el("td", { class: "mono" }, c.duration),
@@ -91,8 +90,6 @@ export function render() {
             el("dd", {}, c.caller),
             el("dt", {}, "Teléfono"),
             el("dd", { class: "mono" }, c.phone),
-            el("dt", {}, "Agente"),
-            el("dd", {}, c.agent),
             el("dt", {}, "Motivo"),
             el("dd", {}, c.reason),
             el("dt", {}, "Resultado"),
@@ -159,7 +156,6 @@ export function render() {
             {},
             el("th", {}, "Paciente"),
             el("th", {}, "Motivo"),
-            el("th", { class: "hide-md" }, "Agente"),
             el("th", {}, "Resultado"),
             el("th", { class: "hide-lg" }, "Sentimiento"),
             el("th", {}, "Duración"),
@@ -208,11 +204,11 @@ function chatCard(c, signalsOpen, onToggle) {
     el(
       "div",
       { class: "chat-card__head" },
-      el("span", { class: "avatar avatar--accent" }, c.agent[0]),
+      icon("maio", "chat-card__logo"),
       el(
         "div",
         { style: { minWidth: 0 } },
-        el("div", { class: "chat-card__title" }, `${c.agent} · ${c.caller}`),
+        el("div", { class: "chat-card__title" }, c.caller),
         el("div", { class: "chat-card__sub truncate" }, `${c.reason} · ${c.time}`),
       ),
       el(
@@ -241,18 +237,16 @@ function chatCard(c, signalsOpen, onToggle) {
         el(
           "div",
           { class: `chat__row chat__row--${who}`, style: { animationDelay: `${i * 60}ms` } },
-          el(
-            "span",
-            { class: `chat__avatar${who === "agent" ? " chat__avatar--agent" : ""}` },
-            who === "agent" ? c.agent[0] : c.caller[0],
-          ),
+          who === "agent"
+            ? el("span", { class: "chat__avatar chat__avatar--agent" }, icon("maio", "chat__avatar-mark"))
+            : el("span", { class: "chat__avatar" }, c.caller[0]),
           el(
             "div",
             {},
             el(
               "div",
               { class: "chat__meta" },
-              el("span", {}, who === "agent" ? c.agent : c.caller),
+              who === "agent" ? null : el("span", {}, c.caller),
               el("span", { class: "mono" }, stamp(i)),
             ),
             el("div", { class: "chat__bubble" }, text),
@@ -263,7 +257,7 @@ function chatCard(c, signalsOpen, onToggle) {
         el(
           "div",
           { class: "chat__row chat__row--agent" },
-          el("span", { class: "chat__avatar chat__avatar--agent" }, c.agent[0]),
+          el("span", { class: "chat__avatar chat__avatar--agent" }, icon("maio", "chat__avatar-mark")),
           el(
             "div",
             { class: "chat__bubble chat__typing" },
@@ -342,7 +336,7 @@ export function signalsPanel(c) {
       "div",
       { class: "signals__strip brand-wash" },
       isLive ? el("span", { class: "dot dot--pulse" }) : el("span", { class: "dot" }),
-      el("span", {}, `${isLive ? "Lectura en vivo" : "Lectura realizada"} · ${c.agent}`),
+      el("span", {}, `${isLive ? "Lectura en vivo" : "Lectura realizada"} · maio`),
       liveNumber,
     ),
 

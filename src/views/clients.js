@@ -110,7 +110,7 @@ export function render() {
                   { class: `timeline__item${h.outcome === "escalated" ? " timeline__item--alert" : ""}` },
                   el("div", { class: "timeline__time" }, `${h.time} · ${h.duration}`),
                   el("div", { class: "timeline__title" }, h.reason),
-                  el("div", { class: "timeline__desc" }, `Atendida por ${h.agent}`),
+                  el("div", { class: "timeline__desc" }, `Atendida por maio`),
                 ),
               ),
             )

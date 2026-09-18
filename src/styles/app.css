@@ -1500,6 +1500,73 @@ table.data .cell-sub {
   .map { position: static; }
 }
 
+/* --- Mapa de relaciones a pantalla completa --------------- */
+.map-full {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: var(--sidebar-w);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--parchment);
+  background-image:
+    linear-gradient(rgba(var(--ink-rgb), 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--ink-rgb), 0.055) 1px, transparent 1px);
+  background-size: 26px 26px;
+  animation: fade-in var(--dur) var(--ease-out) both;
+}
+
+.map-full__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: none;
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--stroke-soft);
+  background: rgba(var(--white-rgb), 0.86);
+  backdrop-filter: var(--blur-sm);
+  -webkit-backdrop-filter: var(--blur-sm);
+}
+
+.map-full__logo {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  color: var(--pitch-black);
+}
+
+.map-full__stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  cursor: grab;
+}
+
+.map-full__canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.map-full__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  flex: none;
+  padding: var(--sp-3) var(--sp-5);
+  border-top: 1px solid var(--stroke-soft);
+  background: rgba(var(--white-rgb), 0.86);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 960px) {
+  .map-full { left: 0; }
+}
+
 /* --- Drawer lateral --------------------------------------- */
 .drawer-scrim {
   position: fixed;
@@ -1693,6 +1760,18 @@ table.data .cell-sub {
   gap: var(--sp-3);
   padding: var(--sp-4) var(--sp-5);
   border-bottom: 1px solid var(--stroke-soft);
+}
+
+.chat-card__logo {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  color: var(--pitch-black);
+}
+
+.chat__avatar-mark {
+  width: 17px;
+  height: 17px;
 }
 
 .chat-card__title {

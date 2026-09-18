@@ -1,6 +1,6 @@
-# maio · Plataforma agéntica
+# maio · Recepción agéntica
 
-Interfaz para operar agentes de voz que actúan como recepcionistas del sector sanitario.
+Interfaz para operar **maio**, el agente de voz que atiende la recepción de una clínica.
 Solo front-end: datos simulados en `src/data/mock.js`, listos para sustituir por la API real.
 
 ## Ejecutar
@@ -18,15 +18,12 @@ python3 -m http.server 4321
 | --- | --- |
 | `index.html` | Punto de entrada |
 | `src/main.js` | Shell, menú lateral y router por hash |
-| `src/views/` | Inicio (reportes), Llamadas, Agentes, Clientes |
-| `src/components/ui.js` | Tarjetas, KPIs, gráficos SVG, switches |
+| `src/views/` | Inicio, Llamadas, Clientes, Configuración |
+| `src/components/` | Tarjetas, KPIs, gráficos SVG, switches y drawer |
 | `src/styles/tokens.css` | Variables de diseño (paleta, radios, blur, grano, tipografía) |
-| `src/data/mock.js` | Datos de demostración |
+| `src/data/mock.js` | Perfil de maio, llamadas, pacientes y métricas de demostración |
 | `design/palette.json` | Paleta canónica |
 | `design/brand/` | Logo, icono y normas de marca |
-
-Las vistas de Agenda, Acciones, Conocimiento y Ajustes siguen en `src/views/` pero no están
-enrutadas: basta con volver a añadirlas a `ROUTES` en [src/main.js](src/main.js).
 
 ## Marca
 
@@ -55,7 +52,7 @@ moderación: el rojo queda reservado a lo crítico.
 
 Las paletas anteriores quedan archivadas en `design/palette.json` bajo `reserved`.
 
-## Conectar agentes reales
+## Conectar el agente real
 
 Sustituir los exports de `src/data/mock.js` por llamadas a la API. Las vistas leen los datos
 en el momento del render, así que basta con devolver las mismas formas de objeto.

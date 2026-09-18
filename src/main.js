@@ -4,17 +4,17 @@ import { clinic } from "./data/mock.js";
 
 import * as home from "./views/home.js";
 import * as calls from "./views/calls.js";
-import * as agents from "./views/agents.js";
+import * as config from "./views/config.js";
 import * as clients from "./views/clients.js";
 
 const ROUTES = {
   "/": { view: home, icon: "reports", label: "Inicio" },
   "/llamadas": { view: calls, icon: "phone", label: "Llamadas", badge: "12" },
-  "/agentes": { view: agents, icon: "agents", label: "Agentes" },
   "/clientes": { view: clients, icon: "clients", label: "Clientes" },
+  "/configuracion": { view: config, icon: "settings", label: "Configuración" },
 };
 
-const NAV = [{ label: "Plataforma", items: ["/", "/llamadas", "/agentes", "/clientes"] }];
+const NAV = [{ label: "maio", items: ["/", "/llamadas", "/clientes", "/configuracion"] }];
 
 const contentHost = el("div", { class: "content", id: "content" });
 const titleNode = el("h1", { class: "topbar__title" });
@@ -81,8 +81,8 @@ function sidebar() {
     el(
       "div",
       { class: "sidebar__footer grain" },
-      el("h4", {}, "Recepción activa"),
-      el("p", {}, "3 agentes atendiendo · 2 llamadas en curso"),
+      el("h4", {}, "maio en servicio"),
+      el("p", {}, "2 llamadas en curso · 0 en cola"),
       el(
         "div",
         { class: "row" },
@@ -134,12 +134,6 @@ function topbar() {
       { class: "topbar__actions" },
       search,
       el("button", { class: "btn btn--icon btn--ghost", title: "Notificaciones" }, icon("bell", "nav__icon")),
-      el(
-        "button",
-        { class: "btn btn--primary", onclick: () => agents.openNewAgent() },
-        icon("plus", "nav__icon"),
-        "Nuevo agente",
-      ),
     ),
   );
 }
