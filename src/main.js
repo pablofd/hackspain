@@ -14,7 +14,10 @@ const ROUTES = {
   "/configuracion": { view: config, icon: "settings", label: "Configuración" },
 };
 
-const NAV = [{ label: "maio", items: ["/", "/llamadas", "/clientes", "/configuracion"] }];
+const NAV = [
+  { label: "Plataforma", items: ["/", "/llamadas", "/clientes"] },
+  { label: "Ajustes", items: ["/configuracion"] },
+];
 
 const contentHost = el("div", { class: "content", id: "content" });
 const titleNode = el("h1", { class: "topbar__title" });
