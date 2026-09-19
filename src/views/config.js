@@ -80,7 +80,7 @@ export function render() {
   return el(
     "div",
     { class: "view" },
-    el("div", { class: "row row--wrap" }, tabsBar, el("div", { class: "ml-auto" }, statusBtn)),
+    el("div", { class: "row row--wrap" }, tabsBar, statusBtn),
     board,
   );
 }
