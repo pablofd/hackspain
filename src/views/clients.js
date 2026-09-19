@@ -9,11 +9,17 @@ export const meta = {
   sub: "Pacientes, historial de contacto y contexto que usan los agentes",
 };
 
+/* El enlace del mapa puede traer id, nombre con acentos o teléfono */
+const norm = (s) =>
+  s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase().replace(/\s+/g, " ");
+
 export function render(param) {
   let query = "";
-  const wanted = param ? decodeURIComponent(param).toLowerCase() : "";
+  const wanted = param ? norm(decodeURIComponent(param)) : "";
   let selected =
-    clients.find((c) => c.id.toLowerCase() === wanted || c.name.toLowerCase() === wanted) || clients[0];
+    clients.find(
+      (c) => norm(c.id) === wanted || norm(c.name) === wanted || norm(c.phone) === wanted,
+    ) || clients[0];
   const tbody = el("tbody", {});
   const detailHost = el("div", { class: "stack stack--lg" });
 

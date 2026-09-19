@@ -83,9 +83,9 @@ export function networkPanel() {
 
 /* Ficha rápida de la persona seleccionada en el mapa */
 function personCard(person, onClose) {
-  const client = clients.find((c) => c.name === person.name);
   const history = calls.filter((c) => c.caller === person.name);
   const last = history[0];
+  const client = findClient(person, last);
 
   return el(
     "article",
@@ -140,13 +140,29 @@ function personCard(person, onClose) {
       {
         class: "btn btn--primary btn--sm",
         style: { marginTop: "14px", width: "100%" },
-        onclick: () => {
-          location.hash = `#/clientes/${encodeURIComponent(client?.id || person.name)}`;
-        },
+        disabled: !client,
+        onclick: () => client && openClient(client.id),
       },
-      "Ver más en Clientes",
+      client ? "Ver más en Clientes" : "Sin ficha en Clientes",
     ),
   );
+}
+
+const norm = (s) =>
+  s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase().replace(/\s+/g, " ");
+
+/* El nombre del mapa viene de las llamadas: casa sin acentos y, si falla, por teléfono */
+function findClient(person, last) {
+  const byName = clients.find((c) => norm(c.name) === norm(person.name));
+  if (byName) return byName;
+  return last?.phone ? clients.find((c) => c.phone === last.phone) : undefined;
+}
+
+/* Si ya estamos en la ficha destino el hash no cambia, así que forzamos el repintado */
+function openClient(id) {
+  const target = `#/clientes/${encodeURIComponent(id)}`;
+  if (location.hash === target) window.dispatchEvent(new HashChangeEvent("hashchange"));
+  else location.hash = target;
 }
 
 function pill(text, variant) {
