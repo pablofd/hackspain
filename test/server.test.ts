@@ -113,7 +113,7 @@ for (const count of [10, 20]) {
 test("ten concurrent calls keep independent private audio recordings", { timeout: 10_000 },
   () => exerciseConcurrentCalls(10, true));
 
-test("the wire includes bounded end-of-turn silence after generated speech, not during idle startup", { timeout: 5000 }, async () => {
+test("the wire includes exactly four seconds of end-of-turn silence, not an endless idle stream", { timeout: 10000 }, async () => {
   const settings = config();
   const messages: Buffer[] = [];
   let speak: (() => void) | undefined;
@@ -138,7 +138,7 @@ test("the wire includes bounded end-of-turn silence after generated speech, not 
       if (packet.event !== "media") return;
       assert.equal(packet.streamSid, "stream-endpointing");
       messages.push(decodeAudio(packet.media.payload));
-      if (messages.length === 62) completed.resolve();
+      if (messages.length === 202) completed.resolve();
     });
     await once(client, "open");
     client.send(JSON.stringify(start("endpointing")));
@@ -149,7 +149,7 @@ test("the wire includes bounded end-of-turn silence after generated speech, not 
     speak();
     await completed.promise;
     await delay(80);
-    assert.equal(messages.length, 62);
+    assert.equal(messages.length, 202);
     assert.deepEqual(messages.slice(0, 2), [Buffer.alloc(160, 0x80), Buffer.alloc(160, 0x80)]);
     assert.ok(messages.slice(2).every((frame) => frame.length === 160 && frame.every((sample) => sample === 0xff)));
     const ended = once(client, "close");

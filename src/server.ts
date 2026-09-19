@@ -75,8 +75,8 @@ export function createVoiceServer(
 
   sockets.on("connection", (client) => {
     const controller = new AbortController();
-    // A bounded 1.2 s tail lets the remote VAD finish a completed speech item.
-    const audio = new AudioQueue(1500, 60);
+    // Advance a remote semantic VAD's audio clock without streaming silence indefinitely.
+    const audio = new AudioQueue(1500, 200);
     let voice: VoiceSession | undefined;
     let opening: Promise<void> | undefined;
     let streamId: string | undefined;
