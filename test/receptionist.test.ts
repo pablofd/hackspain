@@ -348,6 +348,59 @@ test("historical alternatives preserve current specialty, site and request isola
   assert.deepEqual(separate.no_booking.previous_options, []);
 });
 
+test("availability recommends the earliest slot but preserves an explicitly selected later slot", async () => {
+  const later = { ...slot, start_time: "2026-09-19T12:00:00+02:00" };
+  const h = harness({ slots: [later, slot] });
+  await identify(h);
+  const result = z.object({
+    recommended_slot_id: z.string(), instruction: z.string(),
+    slots: z.array(z.object({ slot_id: z.string(), start_time: z.string() })),
+  }).parse(await h.execute("search_availability", {
+    patient_id: patient.patient_id, specialty_id: slot.specialty_id, date_phrase: "Saturday",
+  }));
+  assert.equal(result.recommended_slot_id, result.slots[0]?.slot_id);
+  assert.equal(result.slots[0]?.start_time, slot.start_time);
+  assert.match(result.instruction, /not an unsolicited menu/);
+  const selected = result.slots.find((item) => item.start_time === later.start_time);
+  assert.ok(selected);
+  const proposal = z.object({ proposal_id: z.string() }).parse(await h.execute("prepare_action", {
+    request: { action: "BOOK", patient_id: patient.patient_id, slot_id: selected.slot_id, policy_id: patient.insurer },
+  }));
+  h.nextTurn();
+  await h.execute("confirm_action", { proposal_id: proposal.proposal_id, confirmed: true });
+  assert.equal(h.writes[0]?.slot, later.start_time);
+});
+
+test("historical rechecks preserve a nearest-site request without adding a conflicting site filter", async () => {
+  const h = harness({
+    addressResolver: { async resolve() {
+      return { source: "cartociudad", status: "resolved", truncated: false, candidates: [
+        { id: "synthetic-origin", label: "Synthetic public street", kind: "portal", latitude: 40.4, longitude: -3.7 },
+      ] };
+    } },
+  });
+  await identify(h);
+  const origin = z.object({ origin_id: z.string() }).parse(await h.execute("locate_origin", {
+    address: "Synthetic public street 10, Madrid",
+  }));
+  const first = z.object({ request_id: z.string() }).parse(await h.execute("search_availability", {
+    patient_id: patient.patient_id, specialty_id: slot.specialty_id, nearest_origin_id: origin.origin_id,
+  }));
+  const empty = z.object({ no_booking: z.object({
+    previous_options: z.array(z.object({ recheck: z.record(z.string(), z.unknown()) })),
+  }) }).parse(await h.execute("search_availability", {
+    patient_id: patient.patient_id, request_id: first.request_id, date_phrase: "Monday",
+  }));
+  const recheck = empty.no_booking.previous_options[0]?.recheck;
+  assert.ok(recheck);
+  assert.equal(recheck.location_id, undefined);
+  const refreshed = z.object({ slots: z.array(z.object({ location_id: z.string() })) }).parse(
+    await h.execute("search_availability", recheck),
+  );
+  assert.equal(refreshed.slots[0]?.location_id, slot.location_id);
+  assert.equal(h.writes.length, 0);
+});
+
 test("same-day slots are excluded and earliest search reaches later 14-day windows", async () => {
   const h = harness({ slots: [
     { ...slot, start_time: "2026-09-18T23:00:00+02:00" },

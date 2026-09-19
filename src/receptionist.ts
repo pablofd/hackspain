@@ -715,7 +715,8 @@ export class Receptionist {
         requires_new_search: true, submitted: false,
         recheck: {
           patient_id: request.patientId, request_id: request.id,
-          specialty_id: request.specialtyId, provider_id: slot.provider_id, location_id: slot.location_id,
+          specialty_id: request.specialtyId, provider_id: slot.provider_id,
+          ...(!input.nearest_origin_id ? { location_id: slot.location_id } : {}),
           date_from: day, date_to: day, weekday: madridWeekday.format(date).toLowerCase(),
           time_of_day: Number(madridHour.format(date)) < 14 ? "morning" : "afternoon",
         },
@@ -1005,7 +1006,8 @@ export class Receptionist {
     } : null;
     return {
       request_id: request.id, patient_id: patient.patient_id,
-      slots, blocked: scan.blocked, searched_from: dates.dateFrom, searched_to: scan.endSearched,
+      slots, recommended_slot_id: firstSlot?.slot_id ?? null,
+      blocked: scan.blocked, searched_from: dates.dateFrom, searched_to: scan.endSearched,
       booking_proposal: bookingProposal, submitted: false, pricing_status: "not_supplied",
       ...(dates.adjustedFrom ? { adjusted_from_closed_date: dates.adjustedFrom } : {}),
       ...(merged.nearest_origin_id ? { evaluated_sites: evaluatedSites } : {}),
@@ -1028,10 +1030,10 @@ export class Receptionist {
       instruction: slots.length
         ? bookingProposal
           ? "booking_proposal is already prepared, NOT submitted, for its paired slot_id and policy. If these match the final request, read its exact details and wait for a NEW caller turn explicitly agreeing, then confirm_action with its proposal_id. Do not prepare that same offer again. For another slot or policy, use prepare_action before its readback; corrections require revise_request and a new search. Do not treat questions or unrelated agreement as consent."
-          : "No BOOK proposal was prepared. Use prepare_action for the caller's intended action and chosen slot/eligible held policy BEFORE reading the final offer. Multiple eligible held policies require an explicit policy selection in prepare_action. Wait for a new caller turn explicitly confirming those details, then confirm_action. Do not repeat identification or invent extra constraints."
+          : "No BOOK proposal was prepared. Unless the caller requested specific alternatives, offer the single earliest matching recommended_slot_id, not an unsolicited menu of later times. Use prepare_action for the intended action and matching slot/eligible held policy BEFORE its readback. An explicitly chosen different time must still be honored. Multiple eligible held policies require explicit selection. Wait for a new confirming caller turn, then confirm_action."
         : [
           "No outcome has been submitted. Preserve the caller's specialty, site and time constraints.",
-          "This empty result applies only to searched_from/searched_to. previous_options are historical, not current proposals: if the caller selects one, use its recheck date/filter arguments, prepare the exact matching start_time/type from fresh results, and reconfirm. Do not reuse an old proposal ID or report no_availability for a different selected day.",
+          "This empty result applies only to searched_from/searched_to. previous_options are historical, not current proposals: if the caller selects one, use its recheck date/filter arguments, prepare the exact matching provider/site/start_time/type from fresh results, and reconfirm. Do not reuse an old proposal ID or report no_availability for a different selected day.",
           "Honor an explicitly requested alternative provider/site/time before refusing: revise_request, then search with the same request_id and explicitly relax only caller-approved constraints.",
           "If the caller agrees to check the following day, use next_day_search. Do not repeat the original date phrase or claim a new day was searched when searched_from/searched_to are unchanged.",
           request.needsOtherPolicyAnswer
@@ -1408,6 +1410,8 @@ export function receptionistInstructions(startedAt: Date, allowSubmissions: bool
     "On a noisy line or uncertain digits/names, ask for the unclear fragment or spelling instead of guessing. After a lookup fails, confirm the supplied fields rather than demanding every identifier. Do not repeat identifiers unnecessarily once verified.",
     "Use resolve_request for the explicit specialty/provider already stated by the caller. Their explicitly requested specialty outranks routine symptom routing: do not replace it with an injury-triage specialty. Route routine symptoms only when no specialty/provider was chosen. The bounded complaint router is NOT a universal gate; an unsupported complaint does not invalidate an explicit scheduling request. Emergency red flags still override scheduling. Use original catalogue names/titles; clarify ambiguous names.",
     "Ask which specialty or named doctor they need and any site/time constraints. If they want the earliest and give no window, omit dates in search_availability; it searches from tomorrow. Do not add a site or other preference they did not request.",
+    "Offer one earliest eligible matching slot first, including after a corrected date. Use recommended_slot_id or booking_proposal. Do not offer an unsolicited menu of later times; discuss alternatives only when requested or the first offer is rejected. Always honor a caller's explicit later-time choice rather than replacing it with an earlier time.",
+    "Do not look up or negotiate unrelated existing appointments as a prerequisite to a clearly separate new booking. Use list_appointments for a requested change/cancellation, an appointment-history question, or a genuinely ambiguous existing-appointment request.",
     "Never set a provider-language filter just because the caller speaks English, Spanish or Catalan. Only set language when the caller explicitly asks for a doctor speaking that language.",
     "Pass a colloquial date exactly in date_phrase so code resolves it from the call date in Madrid. When the requested day/site is closed, offer the returned nextOpenDate and only set allow_next_open_day after the caller agrees; preserve site and morning/afternoon.",
     "When an OPEN day has no eligible slots and the caller agrees to the following day, use the returned next_day_search/advance_day with the same request_id. Dates like tomorrow always refer to call start, not the last searched date. Read searched_from/searched_to before claiming you checked another day.",
