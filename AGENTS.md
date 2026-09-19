@@ -33,6 +33,7 @@ code. Use synthetic fixtures and normal API lookups instead.
 | `src/azure-realtime.ts` | Azure OpenAI Realtime connection, audio, turns, transcription and tool dispatch. |
 | `src/azure-live.ts`, `src/live-transcript.ts` | Isolated experimental GPT-Live connection, Responses delegation and conservative fragment-based confirmation guards. |
 | `src/voice-provider.ts` | Explicit connector selection and independent model/gain profiles; no automatic fallback. |
+| `src/prosper-runs.ts`, `scripts/prosper-runs.ts` | Explicit problem-specific scored admission, read-only console monitoring and sanitized private run snapshots. |
 | `src/receptionist.ts` | Runtime instructions, tool schemas, verified patients, slots, proposals, confirmations and outcomes. |
 | `src/prosper.ts`, `src/prosper-types.ts` | Authenticated clinic/submission requests, runtime schemas, receipts and normalization. |
 | `src/scheduling.ts` | Deterministic Madrid date phrases, date windows, age, closures and site openings. |
@@ -64,8 +65,14 @@ code. Use synthetic fixtures and normal API lookups instead.
 - `npm run check:connections -- --voice` invokes paid Azure inference but must
   never submit actions to Prosper. Intercept every POST when evaluating model
   behavior with synthetic call IDs; never send invented IDs to the real API.
-- Do not launch Practice or Run All without the user's request. Debug with
-  synthetic/offline cases first, then one public practice case, not Run All.
+- Do not launch Practice or scored calls without the user's request. Debug with
+  synthetic/offline cases first, then one requested public practice case.
+  `npm run prosper:score -- --problem ID` requests one private scored call;
+  the old Run All batch command is no longer supported. Read-only
+  `npm run prosper -- list|status|watch` never admits a run. Honor the single
+  queued/active team slot and global 12-minute scored cooldown after completion.
+  A lost admission response is uncertain: inspect the run list, never
+  automatically repeat the POST. Stopping a watcher does not cancel its run.
 - Before restarting the active server, check `/healthz` and wait for calls to
   finish. Building `dist/` does not reload an already-running `npm start`.
   Preserve the tunnel and token; do not reset unrelated VM processes.
@@ -109,20 +116,25 @@ code. Use synthetic fixtures and normal API lookups instead.
 The latest supplied rules use:
 
 ```text
-points = sum(passed private cases for each problem * that problem's weight)
+points = sum(min(4, pooled passed scored calls for each problem) * that problem's weight)
 ```
 
-There are 18 problems, 17 scored, four private cases per open scored problem.
-Weights are 1-5. Full-roster maximum: **196 points** across 68 calls.
+There are 18 problems, 17 scored, at most four credited passes per problem.
+Weights are 1-5. Full-roster maximum: **196 points** across 68 credited passes.
 The old pass-fraction formula and maximum of 49 are obsolete.
+The former best-Run-All rule was replaced during 19 September: scored calls
+now pool across all runs. Historical observations below retain their original
+run results; do not recompute or mislabel them as the current scoring rule.
 
 - A case is binary: its complete action list must match an acceptable outcome.
   No partial credit for correct fields, nearly-correct IDs or one of two actions.
 - Multiple tied earliest providers can be valid. Do not invent tie-break rules
   that override the patient's constraints.
-- The board uses the team's best Run All, not the last or cumulative runs.
+- The board pools judged scored calls, capped at four credited passes per
+  problem. A new failure cannot remove already banked points.
   Public practice never scores. Public answers move with the day's date anchor.
-- Problems open progressively; a run uses the roster open at admission.
+- Problems open progressively; one scored run targets one open scored problem.
+  Scored cooldown is 12 minutes after completion and global across problems.
   The supplied snapshot had problems 1-6 open (2 remains unscored).
 - Maximum three minutes per call. Slow connection or no audible agent audio
   can end it sooner. Streaming silence is not an answer. Do not raise the
@@ -153,7 +165,8 @@ needed. An SSH local forward is only for the user's PC, not the evaluator.
   Twilio keys are camelCase; sequence/chunk/timestamp fields are strings.
   Submission bodies use snake_case.
 - A fresh conversation, tool state, recording, queues and call ID belong to
-  each socket. Run All uses 10 concurrent sockets; Switchboard reaches 20.
+  each socket. Legacy batch runs used concurrent sockets; current scored runs
+  dial one private case. Switchboard still exercises up to 20 independent calls.
 - Barge-in is ours to implement. `clear` currently has no effect at Prosper:
   discard local queued audio and keep model context aligned with sent audio.
 - `VOICE_ENDPOINT_TOKEN` protects inbound calls. `PROSPER_API_KEY` authenticates
@@ -163,6 +176,13 @@ needed. An SSH local forward is only for the user's PC, not the evaluator.
   box removes it. Runs snapshot the endpoint/config at admission.
 - Dashboard login is distinct from the clinic API key. Never infer that a
   successful clinic request grants run-management access.
+  The separately verified programmatic `GET /api/v1/runs`, run-detail and
+  `POST /api/v1/runs` accept the team key; new scored requests select
+  `{"lane":"scored","problem_id":"..."}` rather than a batch. Legacy
+  authenticated `/leaderboard/api/*` routes use a browser
+  session. The current clinic OpenAPI omits the run routes, so reconcile the
+  published quickstart and actual authorized responses rather than inventing
+  endpoints or reusing dashboard credentials.
 
 The EHR is read-only. `/submit/*` reports a proposed write; it does not reserve
 a shared slot or create a patient ID that can then be booked.
@@ -359,7 +379,7 @@ provider_not_found, caller_not_authorised, out_of_scope, medical_emergency
 | # | `problem_id` | Weight | Required behavior / common trap |
 | --- | --- | --- | --- |
 | 1 | `simple_booking` | 1 | Earliest eligible BOOK from tomorrow; obey site/weekday/time constraints; use API visit type. |
-| 2 | `switchboard` | none | 5/10/20 independent calls; diagnostic only, not included in Run All. |
+| 2 | `switchboard` | none | 5/10/20 independent calls; diagnostic only, refused by the scored lane. |
 | 3 | `doctor_and_site` | 2 | Resolve doctor ambiguity/leave/nonexistence; a fallback must preserve specialty AND site. BOOK or justified NO_ACTION. |
 | 4 | `the_new_patient` | 2 | REGISTER only, all demographics correct; never append BOOK without a patient ID. |
 | 5 | `when_exactly` | 2 | Resolve the documented relative dates, openings and closure day; BOOK at the exact minute. |

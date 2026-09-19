@@ -21,6 +21,8 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
     "check:connections": "tsx scripts/check-connections.ts",
+    "prosper": "tsx scripts/prosper-runs.ts",
+    "prosper:score": "tsx scripts/prosper-runs.ts score --wait --watch",
     "check:jev": "tsx scripts/check-jev.ts"
   },
   "dependencies": {

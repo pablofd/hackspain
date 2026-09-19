@@ -35,8 +35,66 @@ learned are maintained in [`AGENTS.md`](AGENTS.md).
 The `/ws` agent can send `/submit/*` actions for the actual `start.callSid`.
 These endpoints report what the agent would do; Prosper's underlying EHR is
 read-only. HTTP 200 acknowledges an action, **not** a passing judging result.
-Practice runs still need to be started from the Prosper dashboard. Connection
+Practice calls can be started from the Prosper dashboard. Connection
 checks explicitly disable submissions, including when using `--voice`.
+
+## Scored calls from the terminal
+
+The programmatic run API uses the team's `PROSPER_API_KEY` in `X-Api-Key`;
+it does not need a dashboard password or browser cookie. The live
+`/api/v1/runs` routes are separate from the legacy cookie-authenticated dashboard
+routes. The clinic OpenAPI snapshot supplied on 19 September omitted run
+management even though its list/detail endpoints were live.
+
+```sh
+# Explicitly admit ONE private call for the selected problem and watch it:
+npm run prosper:score -- --problem no_slot_free
+
+# Read-only operations; they never start or cancel a run:
+npm run prosper -- list
+npm run prosper -- status --run-id RUN_ID
+npm run prosper -- watch --run-id RUN_ID
+
+# One final JSON object on stdout, progress on stderr:
+npm --silent run prosper -- watch --run-id RUN_ID --json
+```
+
+Only run the admission command when a person requests a scored call. No build,
+test, connection check or server startup invokes it. The API allows one queued
+or active run per team, across both lanes. The current scored lane has a global
+12-minute cooldown after the previous scored run finishes, not after admission
+and not separately per problem; `--wait` observes it without repeated POSTs.
+Practice has its own 30-second cadence and is not started by this command.
+The scored run uses the registered integration; the CLI never overrides or
+rewrites its endpoint or headers.
+
+The platform changed scoring during 19 September: scored calls now pool across
+runs, with at most four credited passes per problem. A scored run selects one
+problem and dials one private case; the old `run-all` command is rejected
+without admitting anything. Avoid spending a cooldown on a problem already
+at its four-pass cap. Switchboard is unscored and rejected locally.
+
+GET failures are displayed and retried while monitoring, honoring `Retry-After`.
+An uncertain admission is **not** automatically retried: inspect `list` before
+issuing another scored call. Once an ID is received it is printed and saved under
+`.local/runs/` with mode `0600`, so `watch --run-id` can resume after an interruption.
+Ctrl+C stops the local command, not an already admitted remote run.
+
+The console separates PASS, FAIL, VOID and PENDING from failure signals. A case
+can **pass with `wall_clock` or another signal**; the API's verdict is authoritative.
+While a run is active the API may list only settled cases, so the console counts
+published verdicts without inventing a total or claiming that zero cases remain.
+The currently observed run endpoint does not expose weighted points or private
+expected records, so the CLI reports case counts rather than inventing a score.
+Snapshots omit unrecognized fields and redact credentials/query strings from
+endpoint URLs; they contain no transcript, expected patient record or API key.
+Admission receipt timestamps are retained separately from later observations,
+and a scored admission followed by a different returned lane is an explicit
+error, never silently treated as the requested scored call.
+
+`wall_clock` is the **three-minute total call budget**, not the timeout of a
+single clinic request. Increasing a request timeout does not extend the call.
+Local API receipts and completed HTTP checks do not prove that a case passed.
 
 ## Booking safeguards
 
@@ -282,7 +340,7 @@ a production deployment.
 The clinic API key does not grant a dashboard session: the run-management
 API requires dashboard login. Sign in with the credentials issued by Prosper,
 then choose a published case under **Problems > The Simple Booking > Call**.
-Do not start **Run All** to debug connectivity. Start with one booking case and
+Do not start **scored calls** to debug connectivity. Start with one booking case and
 inspect both the submitted record and conversation before broadening evaluation.
 The implementation contains no public-case answers or fixed patient/slot IDs.
 
@@ -329,7 +387,7 @@ For manual testing, keep both VM terminals open (`npm start` in one and
 process alive. No Azure firewall change or new model deployment is required.
 
 Verify the new `/healthz` and authenticated `/ws` before one public practice.
-Only consider Run All after a successful practice; do not assume an alternate
+Only consider scored calls after a successful practice; do not assume an alternate
 tunnel repairs a run attribution/settlement failure. Do not change the voice
 model, runtime instructions or concurrency limit during the ingress comparison.
 
