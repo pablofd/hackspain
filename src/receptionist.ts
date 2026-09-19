@@ -6,7 +6,7 @@ import { privacyRefusalGuidance, type OutcomeReviewContext } from "./confirmatio
 import { AppError } from "./errors.js";
 import { clinicSummary, type Clinic, type ProsperClient } from "./prosper.js";
 import {
-  idSchema, insurerSchema, nationalPhone, newPatientSchema, normalizeNationalId, patientQuerySchema,
+  idSchema, insurerSchema, nationalPhone, newPatientSchema, normalizeNationalId, patientQuerySchema, validNationalId,
   reasonSchema, normalizeHumanText, type Appointment, type Insurer, type OutcomeReason, type Patient,
   type PatientQuery, type ProsperAction, type Slot, type SubmissionResult,
 } from "./prosper-types.js";
@@ -61,6 +61,8 @@ const toolSchemas = {
   }),
   find_patient: z.strictObject({
     ...patientQuerySchema.shape,
+    national_id: patientQuerySchema.shape.national_id.describe("The caller-supplied DNI/NIE, including its letter. Do not put it in phone or remove the letter."),
+    phone: patientQuerySchema.shape.phone.describe("An actual telephone number, not a DNI/NIE. If the caller supplied a national identifier, use national_id instead."),
     replaces_patient_id: idSchema.optional().describe("Use when correcting a wrong patient's identity; invalidates their unconfirmed drafts."),
   }),
   collect_registration: z.strictObject({
@@ -79,7 +81,7 @@ const toolSchemas = {
     })).max(12).optional().describe("Only symptom facts the caller actually stated. Never mark a suspected, hypothetical or negated symptom as present."),
   }),
   locate_origin: z.strictObject({
-    address: z.string().min(3).max(200).describe("Only the public street/place and town stated for finding the nearest clinic, without patient identity. When selecting a returned candidate, use its selection_arguments unchanged, not its display label."),
+    address: z.string().min(3).max(200).describe("Only the public street/place and municipality, formatted 'street and portal, municipality', optionally with a separate five-digit postal code. Do not append patient identity or apartment details. When selecting a returned candidate, use its selection_arguments unchanged, not its display label."),
     candidate_id: idSchema.optional().describe("Only the returned candidate explicitly selected by the caller. Copy its selection_arguments, including the original address; never invent or reuse an expired ID."),
   }),
   search_availability: availabilityInput,
@@ -609,6 +611,10 @@ export class Receptionist {
 
   private toolDecision(name: string, result: unknown): { details?: unknown } {
     if (!result || typeof result !== "object") return {};
+    if (name === "find_patient" && "identifier_input_adjustment" in result &&
+        result.identifier_input_adjustment === "national_id_from_phone") {
+      return { details: { identifier_field_corrected: true } };
+    }
     if (name === "locate_origin") {
       const resolved = "origin_id" in result && typeof result.origin_id === "string";
       return { details: {
@@ -689,6 +695,21 @@ export class Receptionist {
   }
 
   private async findPatient(query: PatientQuery, turn: number): Promise<unknown> {
+    const phoneAsId = query.phone === undefined ? undefined : normalizeNationalId(query.phone);
+    let adjustedIdentifier = false;
+    if (phoneAsId && /^(?:\d{8}|[XYZ]\d{7})[A-Z]$/.test(phoneAsId)) {
+      if (!validNationalId(phoneAsId)) {
+        throw new AppError("invalid_identifier_in_phone",
+          "The phone field contains a DNI/NIE-shaped value with an invalid check letter. Do not look it up as a phone or guess a new letter. Clarify only the uncertain identifier and send it in national_id.");
+      }
+      if (query.national_id && normalizeNationalId(query.national_id) !== phoneAsId) {
+        throw new AppError("conflicting_lookup_identifiers",
+          "Different national identifiers were supplied in national_id and phone. Keep the intended patient's details separate and clarify the conflict; do not discard either value or guess a phone number.");
+      }
+      query = { ...query, national_id: phoneAsId };
+      delete query.phone;
+      adjustedIdentifier = true;
+    }
     this.observedReasons.clear();
     this.needsOtherPolicyAnswer = false;
     this.latestRequestId = undefined;
@@ -725,17 +746,20 @@ export class Receptionist {
       matches: summaries,
       total_matches: matches.length,
       needs_full_name: needsFullName,
+      ...(adjustedIdentifier ? { identifier_input_adjustment: "national_id_from_phone" } : {}),
       ...(matches.length === 0 && this.registrationIntent ? {
         registration_intent: true,
         registration_ids: [...this.registrations.keys()],
       } : {}),
-      instruction: matches.length === 0 && this.registrationIntent
+      instruction: (adjustedIdentifier
+        ? "A checksum-valid DNI/NIE was supplied in phone and has been looked up as national_id without changing its value. Do not call it an incomplete phone or ask for it again if the patient is verified. "
+        : "") + (matches.length === 0 && this.registrationIntent
         ? "This call includes an explicitly requested registration. No existing record is expected for a new patient: continue collect_registration without repeating verification or reporting patient_not_found. For a separate existing-patient request, clarify only that patient's uncertain identifier; keep the intents separate."
         : needsFullName
           ? hasCorroboratingDetail
             ? "Identity is not verified. Ask only for the patient's full legal name, including all given names and surnames. Reuse the corroborating detail already supplied; do not cycle through more identifiers before clarifying the name. Never supply or read the stored name or identifiers as the answer."
             : "Identity is not verified. Ask for the patient's full legal name and one corroborating detail in one short question. Never supply or read the stored name or identifiers as the answer."
-          : "Use the patient's own details, not a relative's. If not verified, clarify the uncertain supplied identifier or ask for one alternative; never read stored identifiers aloud.",
+          : "Use the patient's own details, not a relative's. If not verified, clarify the uncertain supplied identifier or ask for one alternative; never read stored identifiers aloud."),
     };
   }
 
@@ -1226,6 +1250,10 @@ export class Receptionist {
         resolution = await resolve();
       }
     } catch (error) {
+      if (error instanceof AppError && error.code === "invalid_public_address") {
+        throw new AppError(error.code,
+          "No geocoder request was made: the input format or privacy check failed, not proof that the street does not exist. Use only the public street and portal, then the municipality, with an optional separate five-digit postal code. Reuse those details already supplied; do not append a neighbourhood as another comma field, patient identifiers or private apartment details. Clarify only a genuinely missing public detail, without changing the stated portal.");
+      }
       if (error instanceof AppError && error.code.startsWith("geocoder_")) {
         throw new AppError(error.code,
           "The public-address lookup is temporarily unavailable. Keep the address; do not guess coordinates, call it no_availability, or repeatedly retry. Explain the lookup error briefly; retry later or use a named site only if the caller agrees.");
@@ -1250,7 +1278,9 @@ export class Receptionist {
     return {
       status: "needs_clarification", candidates, truncated: resolution.truncated,
       ...(resolution.status === "needs_clarification" ? { reason: resolution.reason } : {}),
-      instruction: "Clarify only the missing or ambiguous public location detail. When the caller selects a candidate, repeat its selection_arguments unchanged; do not substitute the display label or invent an ID. If the caller corrects the address instead, resolve it without candidate_id. Do not guess coordinates or a site.",
+      instruction: (candidates.length === 0
+        ? "No exact location is available from this lookup. Do not suggest a different street or portal as if it were the caller's address. Ask only for a missing municipality/postcode or another public reference they actually know; if unresolved, do not claim a closest site. "
+        : "") + "Clarify only the missing or ambiguous public location detail. When the caller selects a candidate, repeat its selection_arguments unchanged; do not substitute the display label or invent an ID. If the caller corrects the address instead, resolve it without candidate_id. Do not guess coordinates or a site.",
     };
   }
 

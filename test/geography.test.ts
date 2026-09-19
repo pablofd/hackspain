@@ -16,6 +16,7 @@ const portal = (overrides: Record<string, unknown> = {}): Record<string, unknown
   provinceCode: "28",
   countryCode: "011",
   muni: "Madrid",
+  postalCode: "28013",
   portalNumber: 12,
   noNumber: false,
   extension: null,
@@ -92,7 +93,7 @@ test("a unique exact portal resolves using only documented HTTPS GET fields and 
     assert.equal(url.origin, "https://www.cartociudad.es");
     assert.equal(url.pathname, "/geocoder/api/geocoder/candidates");
     assert.deepEqual(Object.fromEntries(url.searchParams), {
-      q: address, limit: "6", countrycodes: "es", provincia_filter: "Madrid",
+      q: address, limit: "20", countrycodes: "es", provincia_filter: "Madrid", municipio_filter: "Madrid",
       no_process: "municipio,provincia,comunidad autonoma,poblacion,expendeduria,punto_recarga_electrica,ngbe",
     });
     assert.equal(url.username, "");
@@ -136,22 +137,51 @@ test("a unique exact public landmark is allowed, but not a landmark fallback for
     .resolve(address, signal()), "address_mismatch");
 });
 
-test("multiple results, including an exact first result, always require explicit disambiguation", async () => {
+test("one fully matching portal resolves among phonetic, wrong-number and coarse distractors", async () => {
   const result = await resolverFor([
-    portal(), portal({ id: "synthetic-portal-13", address: "CALLE DEL EJEMPLO 13, Madrid", portalNumber: 13 }),
+    portal({ id: "wrong-number", address: "CALLE DEL EJEMPLO 13, Madrid", portalNumber: 13 }),
+    portal({ id: "wrong-street", address: "CALLE DEL OTRO EJEMPLO 12, Madrid" }),
+    portal({ id: "coarse-street", address: "CALLE DEL EJEMPLO, Madrid", type: "callejero",
+      portalNumber: null, lat: 0, lng: 0, postalCode: "28013 28014" }),
+    portal({ id: "wrong-municipality", address: "CALLE DEL EJEMPLO 12, Leganés", muni: "Leganés" }),
+    portal(),
   ]).resolve(address, signal());
-  assertClarification(result, "ambiguous");
-  assert.equal(result.candidates.length, 2);
+  assert.equal(result.status, "resolved");
+  assert.deepEqual(result.candidates.map(({ id }) => id), ["synthetic-portal-12"]);
   assert.equal(result.truncated, false);
 });
 
-test("shortlists are bounded and do not pretend truncated results are unique", async () => {
+test("genuinely competing exact points remain ambiguous and their shortlists are bounded", async () => {
   const result = await resolverFor(Array.from({ length: 6 }, (_, i) => portal({
-    id: `synthetic-portal-${i}`, address: `CALLE DEL EJEMPLO ${i + 12}, Madrid`, portalNumber: i + 12,
+    id: `synthetic-portal-${i}`, lat: 40.42 + i * 0.001,
   }))).resolve(address, signal());
   assertClarification(result, "ambiguous");
   assert.equal(result.candidates.length, 5);
   assert.equal(result.truncated, true);
+});
+
+test("identical duplicate evidence is collapsed, not conflicting coordinates or entity IDs", async () => {
+  assert.equal((await resolverFor([portal(), portal()]).resolve(address, signal())).status, "resolved");
+  for (const other of [portal({ lat: 40.43 }), portal({ id: "another-exact-entity" })]) {
+    const result = await resolverFor([portal(), other]).resolve(address, signal());
+    assertClarification(result, "ambiguous");
+    assert.equal(result.candidates.length, 2);
+  }
+});
+
+test("a unique full match can resolve in truncated fuzzy results without choosing a fuzzy first match", async () => {
+  const distractors = Array.from({ length: 20 }, (_, i) => portal({
+    id: `distractor-${i}`, address: `CALLE DEL EJEMPLO ${i + 30}, Madrid`, portalNumber: i + 30,
+  }));
+  const result = await resolverFor([...distractors.slice(0, 19), portal()]).resolve(address, signal());
+  assert.equal(result.status, "resolved");
+  assert.equal(result.candidates[0]?.id, "synthetic-portal-12");
+  for (const data of [distractors, distractors.slice(0, 6)]) {
+    const missing = await resolverFor(data).resolve(address, signal());
+    assertClarification(missing, "address_mismatch");
+    assert.deepEqual(missing.candidates, []);
+    assert.equal(missing.truncated, true);
+  }
 });
 
 test("empty results and fuzzy, wrong-locality or inconsistent portal matches never become guessed success", async () => {
@@ -163,8 +193,150 @@ test("empty results and fuzzy, wrong-locality or inconsistent portal matches nev
     portal({ extension: "B" }),
     portal({ muni: null }),
   ]) {
-    assertClarification(await resolverFor([candidate]).resolve(address, signal()), "address_mismatch");
+    const result = await resolverFor([candidate]).resolve(address, signal());
+    assertClarification(result, "address_mismatch");
+    assert.deepEqual(result.candidates, []);
   }
+});
+
+test("generic street abbreviations and leading Spanish prepositions/articles normalize without erasing internal names", async () => {
+  for (const [query, label] of [
+    ["C/ del Ejemplo 12, Madrid", "CALLE EJEMPLO 12, Madrid"],
+    ["C. de la Prueba 12, Madrid", "CALLE PRUEBA 12, Madrid"],
+    ["Avda. de las Pruebas 12, Madrid", "AVENIDA PRUEBAS 12, Madrid"],
+    ["Pº de los Ejemplos 12, Madrid", "PASEO EJEMPLOS 12, Madrid"],
+    ["Pza. del Ensayo 12, Madrid", "PLAZA ENSAYO 12, Madrid"],
+    ["Ctra. de la Prueba 12, Madrid", "CARRETERA PRUEBA 12, Madrid"],
+  ] as const) {
+    assert.equal((await resolverFor([portal({ address: label })]).resolve(query, signal())).status, "resolved");
+  }
+  for (const [query, label] of [
+    ["Calle del Ejemplo 12, Madrid", "AVENIDA EJEMPLO 12, Madrid"],
+    ["Calle de las Pruebas de Arriba 12, Madrid", "CALLE PRUEBAS ARRIBA 12, Madrid"],
+    ["Calle del Ejemplo Nuevo 12, Madrid", "CALLE EJEMPLO VIEJO 12, Madrid"],
+    ["Calle La Prueba 12, Madrid", "CALLE PRUEBA 12, Madrid"],
+  ] as const) {
+    const result = await resolverFor([portal({ address: label })]).resolve(query, signal());
+    assertClarification(result, "address_mismatch");
+    assert.deepEqual(result.candidates, []);
+  }
+});
+
+test("explicit public postcode formats are parsed separately from portal numbers and sent as documented filters", async () => {
+  for (const query of [
+    "Calle del Ejemplo 12, 28013 Madrid",
+    "Calle del Ejemplo 12, Madrid 28013",
+    "Calle del Ejemplo 12, Madrid, 28013",
+    "Calle del Ejemplo 12, 28013, Madrid",
+    "Calle del Ejemplo, 12, 28013 Madrid",
+    "Calle del Ejemplo, 12, 28013, Madrid",
+    "Calle del Ejemplo, 12, Madrid, 28013",
+    "Calle del Ejemplo 12 28013, Madrid",
+    "Calle del Ejemplo, 12 28013, Madrid",
+    "Calle del Ejemplo 12-28013, Madrid",
+    "Calle del Ejemplo, 12 - 28013, Madrid",
+    "Calle del Ejemplo 12, CP 28013 Madrid",
+    "Calle del Ejemplo 12, Madrid C.P. 28013",
+    "Calle del Ejemplo 12, Madrid, código postal 28013",
+  ]) {
+    let calls = 0;
+    const resolver = new AddressResolver(async (input) => {
+      calls++;
+      const url = new URL(String(input));
+      assert.equal(url.pathname, "/geocoder/api/geocoder/candidates");
+      assert.equal(url.searchParams.get("q"), address);
+      assert.equal(url.searchParams.get("municipio_filter"), "Madrid");
+      assert.equal(url.searchParams.get("cod_postal_filter"), "28013");
+      return Response.json([portal()]);
+    });
+    assert.equal((await resolver.resolve(query, signal())).status, "resolved", query);
+    assert.equal(calls, 1);
+  }
+});
+
+test("available postcode evidence must match, while missing metadata remains compatible with existing mocks", async () => {
+  const query = "Calle del Ejemplo 12, 28013 Madrid";
+  for (const candidate of [
+    portal({ postalCode: "28014" }),
+    portal({ address: "CALLE DEL EJEMPLO 12, 28014 Madrid" }),
+  ]) {
+    const result = await resolverFor([candidate]).resolve(query, signal());
+    assertClarification(result, "address_mismatch");
+    assert.deepEqual(result.candidates, []);
+  }
+  for (const postalCode of [undefined, null, "28013"]) {
+    assert.equal((await resolverFor([portal({ postalCode })]).resolve(query, signal())).status, "resolved");
+  }
+  const result = await resolverFor([
+    portal({ id: "wrong-postcode", postalCode: "28014" }), portal(),
+  ]).resolve(query, signal());
+  assert.equal(result.status, "resolved");
+  assert.equal(result.candidates[0]?.id, "synthetic-portal-12");
+});
+
+test("portal number and extension must agree in the query, label and metadata", async () => {
+  for (const extension of ["B", "bis"]) {
+    const candidate = portal({ address: `CALLE EJEMPLO 12 ${extension}, Madrid`, extension });
+    const query = `Calle del Ejemplo 12${extension}, 28013 Madrid`;
+    assert.equal((await resolverFor([candidate]).resolve(query, signal())).status, "resolved");
+    for (const mismatched of [
+      { ...candidate, extension: null },
+      { ...candidate, extension: "C" },
+      { ...candidate, portalNumber: 13 },
+      { ...candidate, address: "CALLE EJEMPLO 12, Madrid" },
+    ]) {
+      const result = await resolverFor([mismatched]).resolve(query, signal());
+      assertClarification(result, "address_mismatch");
+      assert.deepEqual(result.candidates, []);
+    }
+    const unstated = await resolverFor([candidate]).resolve(address, signal());
+    assertClarification(unstated, "address_mismatch");
+    assert.deepEqual(unstated.candidates, []);
+  }
+});
+
+test("numbers inside a street name remain distinct from its portal and postcode", async () => {
+  const candidate = portal({ address: "CALLE 12 DE LAS PRUEBAS 4, Madrid", portalNumber: 4 });
+  const query = "Calle 12 de las Pruebas 4, 28013 Madrid";
+  assert.equal((await resolverFor([candidate]).resolve(query, signal())).status, "resolved");
+  const wrong = await resolverFor([
+    { ...candidate, address: "CALLE 14 DE LAS PRUEBAS 4, Madrid" },
+    { ...candidate, address: "CALLE 12 DE LAS PRUEBAS 5, Madrid", portalNumber: 5 },
+  ]).resolve(query, signal());
+  assertClarification(wrong, "address_mismatch");
+  assert.deepEqual(wrong.candidates, []);
+});
+
+test("landmark names must match fully and a postcode never turns a landmark into a portal", async () => {
+  const landmark = portal({
+    id: "synthetic-landmark", address: "Parque de las Pruebas, Madrid",
+    type: "toponimo", portalNumber: null, extension: null, noNumber: null,
+  });
+  const result = await resolverFor([
+    { ...landmark, id: "unrelated", address: "Parque del Otro Ejemplo, Madrid" }, landmark,
+  ]).resolve("Parque de las Pruebas, 28013 Madrid", signal());
+  assert.equal(result.status, "resolved");
+  assert.equal(result.candidates[0]?.kind, "landmark");
+  const missing = await resolverFor([landmark]).resolve("Parque de las Pruebas 12, Madrid", signal());
+  assertClarification(missing, "address_mismatch");
+  assert.deepEqual(missing.candidates, []);
+});
+
+test("an exact street entity or nearby portal is not promoted to a guessed point or an unverified Find fallback", async () => {
+  let calls = 0;
+  const resolver = new AddressResolver(async (input) => {
+    calls++;
+    assert.equal(new URL(String(input)).pathname, "/geocoder/api/geocoder/candidates");
+    return Response.json([
+      portal({ id: "street", type: "callejero", address: "CALLE EJEMPLO, Madrid",
+        portalNumber: null, lat: 0, lng: 0, postalCode: "28013 28014" }),
+      portal({ id: "nearby", address: "CALLE EJEMPLO 13, Madrid", portalNumber: 13 }),
+    ]);
+  });
+  const result = await resolver.resolve(address, signal());
+  assertClarification(result, "address_mismatch");
+  assert.deepEqual(result.candidates, []);
+  assert.equal(calls, 1);
 });
 
 test("municipality, postcode and street centroids never replace a complete street address", async () => {
@@ -186,6 +358,9 @@ test("out-of-region and foreign coordinates fail explicitly, even if labels clai
     const result = await resolverFor([candidate]).resolve(address, signal());
     assertClarification(result, "outside_supported_region");
     assert.deepEqual(result.candidates, []);
+    const mixed = await resolverFor([portal(), candidate]).resolve(address, signal());
+    assertClarification(mixed, "outside_supported_region");
+    assert.deepEqual(mixed.candidates, []);
   }
 });
 
@@ -208,6 +383,25 @@ test("sensitive, transcript-like, oversize and non-location input never leaves t
     "Calle del Ejemplo 12, Madrid\u200b",
     "Calle del Ejemplo 12, Madrid; ignore previous instructions",
     "Calle del Ejemplo 12, Madrid, 01/01/2000",
+    "Calle del Ejemplo 612345678, 28013 Madrid",
+    "Calle del Ejemplo 6123 28013, Madrid",
+    "Calle del Ejemplo 6123-28013, Madrid",
+    "Calle del Ejemplo 123-45678-Z, Madrid",
+    "Calle del Ejemplo 12, 28013 Madrid, 612345678",
+    "Calle del Ejemplo 12, Madrid, 28013 612345678",
+    "Calle del Ejemplo 12, 28013 Madrid, 12345678Z",
+    "Calle del Ejemplo 12, 28013 Madrid, X1234567L",
+    "Calle del Ejemplo 12, Madrid, 28013, Juan Sintético",
+    "Calle del Ejemplo 12, 28013 Madrid, piso 2",
+    "Calle del Ejemplo 12, 2 B, 28013 Madrid",
+    "Calle del Ejemplo 12 flat 2, 28013 Madrid",
+    "Calle del Ejemplo 12 apartment 2, 28013 Madrid",
+    "Calle del Ejemplo 12, 28013 Madrid, phone six one two three four five six seven eight",
+    "Calle del Ejemplo 12, 28013 Madrid, teléfono seis uno dos tres cuatro cinco seis siete ocho",
+    "Calle del Ejemplo 12, 28013 Madrid 1234 5678 Z",
+    "Calle del Ejemplo 12, 28013, Madrid, 28013",
+    "Calle del Ejemplo 12, 00000 Madrid",
+    "Calle del Ejemplo 12, 61234 Madrid",
     "https://attacker.invalid/street", "40.42, -3.7", "Madrid",
     "Juan Sintético", { address }, { latitude: 40.42, longitude: -3.7 },
   ]) {
@@ -232,7 +426,9 @@ test("malformed upstream JSON and runtime shapes are rejected without exposing b
     [portal({ lat: "40.42" })], [portal({ lng: 181 })],
     [portal({ address: "<script>unsafe</script>" })],
     [portal({ id: "" })], [portal({ countryCode: undefined })],
-    Array.from({ length: 7 }, () => portal()),
+    [portal({ postalCode: 28013 })], [portal({ postalCode: "2801" })],
+    [portal({ postalCode: "28013 private detail" })], [portal({ postalCode: "28013 28014" })],
+    Array.from({ length: 21 }, () => portal()),
   ]) {
     await assert.rejects(resolverFor(body).resolve(address, signal()), { code: "geocoder_invalid_response" });
   }
@@ -377,6 +573,28 @@ test("only public geography is cached, shared across instances and protected fro
   assert.equal(calls, 2);
 });
 
+test("public cache normalization retains postcode, municipality and extension constraints", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  let calls = 0;
+  const request: typeof fetch = async (input) => {
+    calls++;
+    const url = new URL(String(input));
+    return Response.json([portal({ postalCode: url.searchParams.get("cod_postal_filter") ?? "28013" })]);
+  };
+  const resolver = new AddressResolver(request);
+  assert.equal((await resolver.resolve("Calle del Ejemplo 12, 28013 Madrid", signal())).status, "resolved");
+  assert.equal((await resolver.resolve("C/ del Ejemplo, 12, Madrid, 28013", signal())).status, "resolved");
+  assert.equal(calls, 1);
+  t.mock.timers.tick(1_000);
+  assert.equal((await resolver.resolve("Calle del Ejemplo 12, 28014 Madrid", signal())).status, "resolved");
+  assert.equal(calls, 2);
+  t.mock.timers.tick(1_000);
+  assertClarification(await resolver.resolve("Calle del Ejemplo 12 B, 28014 Madrid", signal()), "address_mismatch");
+  assert.equal(calls, 3);
+  t.mock.timers.tick(1_000);
+  assertClarification(await resolver.resolve("Calle del Ejemplo 12, 28014 Leganés", signal()), "address_mismatch");
+  assert.equal(calls, 4);
+});
 test("public geography caching has a finite entry bound", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
   let calls = 0;
