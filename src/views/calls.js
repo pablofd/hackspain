@@ -3,7 +3,7 @@ import { icon } from "../lib/icons.js";
 import { card, pill } from "../components/ui.js";
 import { networkPanel } from "../components/network.js";
 import { calls, outcomeLabels, sentimentLabels } from "../data/mock.js";
-import { RANGES, STATES, DEFAULT_RANGE, inRange, matchesState } from "../data/insights.js";
+import { RANGES, STATES, DEFAULT_RANGE, inRange, matchesState, callQuality } from "../data/insights.js";
 
 export const meta = {
   title: "Llamadas",
@@ -493,18 +493,7 @@ export function signalsPanel(c) {
 /* Salud técnica de la conversación: lo que delata si el agente responde bien en vivo */
 function metricsPanel(c) {
   const isLive = Boolean(c.live);
-  const seed = [...c.id].reduce((a, ch) => a + ch.charCodeAt(0), 0);
-  const pick = (min, max, salt) => min + ((seed * 7 + salt * 31) % (max - min + 1));
-
-  const first = pick(380, 760, 1);
-  const p50 = pick(320, 620, 2);
-  const p95 = p50 + pick(180, 520, 3);
-  const mos = (3.6 + ((seed + 5) % 13) / 10).toFixed(1);
-  const jitter = pick(6, 28, 4);
-  const loss = ((seed % 14) / 10).toFixed(1);
-  const asr = pick(88, 98, 5);
-  const bargeIns = pick(0, 4, 6);
-  const silence = pick(2, 9, 7);
+  const { first, p50, p95, mos, jitter, loss, asr, bargeIns, silence } = callQuality(c);
   const turns = c.transcript.length;
 
   const latencyTone = (ms) => (ms > 900 ? "alert" : ms > 600 ? "slate" : "denim");

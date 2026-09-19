@@ -247,6 +247,55 @@ export function donut(data, { size = 180, thickness = 10, center = "" } = {}) {
   );
 }
 
+/* Dos magnitudes distintas en un mismo lienzo: barras en % y línea en milisegundos */
+export function comboChart(data, { height = 210 } = {}) {
+  const w = 620;
+  const top = 16;
+  const base = height - 26;
+  const usable = base - top;
+  const gap = 18;
+  const slot = (w - gap * (data.length - 1)) / data.length;
+  const bw = Math.min(slot, 28);
+  const pad = (slot - bw) / 2;
+  const id = `cc-${uid()}`;
+  const maxLatency = Math.max(...data.map((d) => d.latency)) * 1.15 || 1;
+  const x = (i) => i * (slot + gap) + pad + bw / 2;
+  const y = (ms) => base - (ms / maxLatency) * usable;
+
+  const line = data.map((d, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(d.latency).toFixed(1)}`).join(" ");
+
+  return svg(
+    "svg",
+    { class: "chart", viewBox: `0 0 ${w} ${height}`, preserveAspectRatio: "none", role: "img" },
+    svg("defs", {}, fadeGradient(id, "var(--pitch-black)", 0.8, 0.06)),
+    ...data.flatMap((d, i) => {
+      const bh = (d.success / 100) * usable;
+      const bx = i * (slot + gap) + pad;
+      return [
+        svg("rect", { x: bx, y: base - bh, width: bw, height: bh, fill: `url(#${id})` }),
+        svg("rect", { x: bx, y: base - bh, width: bw, height: 1.5, fill: "var(--pitch-black)", opacity: 0.85 }),
+        svg(
+          "text",
+          { x: bx + bw / 2, y: height - 8, "text-anchor": "middle", fill: "var(--chart-label)", "font-size": "10" },
+          d.label,
+        ),
+      ];
+    }),
+    svg("path", {
+      d: line,
+      fill: "none",
+      stroke: "var(--lipstick-red)",
+      "stroke-width": "1.6",
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+      "vector-effect": "non-scaling-stroke",
+    }),
+    ...data.map((d, i) =>
+      svg("circle", { cx: x(i), cy: y(d.latency), r: 2.6, fill: "var(--lipstick-red)" }),
+    ),
+  );
+}
+
 export function legend(items) {
   return el(
     "div",

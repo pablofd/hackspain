@@ -1,6 +1,6 @@
 import { el, mount } from "../lib/dom.js";
 import { icon } from "../lib/icons.js";
-import { card, stat, pill, barChart, stackedBars, donut, legend, bar } from "../components/ui.js";
+import { card, stat, pill, barChart, stackedBars, donut, legend, bar, comboChart } from "../components/ui.js";
 import {
   kpis,
   volumeByHour,
@@ -11,7 +11,7 @@ import {
   calls,
   outcomeLabels,
 } from "../data/mock.js";
-import { RANGES, DEFAULT_RANGE, metrics, rangeById } from "../data/insights.js";
+import { RANGES, DEFAULT_RANGE, metrics, rangeById, successVsLatency } from "../data/insights.js";
 
 export const meta = {
   title: "Inicio",
@@ -21,10 +21,51 @@ export const meta = {
 export function render() {
   let range = DEFAULT_RANGE;
   const statsHost = el("div", { class: "grid grid--3" });
+  const qualityHost = el("div", { class: "grid grid--3" });
+  const latencyHost = el("div", {});
 
   function renderStats() {
     const m = metrics(range);
     const when = rangeById(range).short;
+    mount(
+      latencyHost,
+      card(
+        {
+          title: "Resolución frente a latencia",
+          sub: "Barras: llamadas resueltas · línea: latencia media de respuesta",
+        },
+        comboChart(successVsLatency(range)),
+        legend([
+          { label: "Resueltas (%)", color: "var(--pitch-black)" },
+          { label: "Latencia media (ms)", color: "var(--lipstick-red)" },
+        ]),
+      ),
+    );
+    mount(
+      qualityHost,
+      stat({
+        label: "Latencia de respuesta",
+        value: m.latency,
+        unit: "ms",
+        trend: m.trend.latency,
+        lowerIsBetter: true,
+        foot: `P95 ${m.latencyP95} ms · ${when}`,
+      }),
+      stat({
+        label: "Calidad de audio",
+        value: m.mos.toFixed(1),
+        unit: "/5",
+        trend: m.trend.mos,
+        foot: `MOS medio · jitter ${m.jitter} ms`,
+      }),
+      stat({
+        label: "Transcripción correcta",
+        value: m.asr,
+        unit: "%",
+        trend: m.trend.asr,
+        foot: `confianza media · ${m.bargeIns} interrupciones por llamada`,
+      }),
+    );
     mount(
       statsHost,
       stat({
@@ -339,5 +380,19 @@ export function render() {
         ),
       ),
     ),
+
+    el(
+      "div",
+      { class: "row row--wrap" },
+      el("div", { class: "section-title" }, "Calidad técnica de las conversaciones"),
+      el(
+        "a",
+        { class: "btn btn--sm btn--ghost ml-auto", href: "#/llamadas" },
+        "Ver por llamada",
+        icon("arrowUpRight", "nav__icon"),
+      ),
+    ),
+    qualityHost,
+    latencyHost,
   );
 }

@@ -58,9 +58,30 @@ const pct = (part, total) => (total ? Math.round((part / total) * 100) : 0);
 
 const change = (now, before) => (before ? Number((((now - before) / before) * 100).toFixed(1)) : null);
 
+/* Telemetría de demo derivada del identificador: estable entre cargas y distinta por llamada */
+export function callQuality(c) {
+  const seed = [...c.id].reduce((a, ch) => a + ch.charCodeAt(0), 0);
+  const pick = (min, max, salt) => min + ((seed * 7 + salt * 31) % (max - min + 1));
+  const p50 = pick(320, 620, 2);
+  return {
+    first: pick(380, 760, 1),
+    p50,
+    p95: p50 + pick(180, 520, 3),
+    mos: Number((3.6 + ((seed + 5) % 13) / 10).toFixed(1)),
+    jitter: pick(6, 28, 4),
+    loss: Number(((seed % 14) / 10).toFixed(1)),
+    asr: pick(88, 98, 5),
+    bargeIns: pick(0, 4, 6),
+    silence: pick(2, 9, 7),
+  };
+}
+
+const mean = (values) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0);
+
 function summarise(list) {
   const closed = list.filter((c) => !c.live);
   const durations = closed.map((c) => seconds(c.duration)).filter(Boolean);
+  const q = list.map(callQuality);
   return {
     total: list.length,
     booked: list.filter((c) => c.booked).length,
@@ -68,7 +89,36 @@ function summarise(list) {
     escalated: list.filter((c) => c.outcome === "escalated").length,
     automation: pct(closed.filter((c) => c.outcome === "resolved").length, closed.length),
     avgSeconds: durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : 0,
+    latency: Math.round(mean(q.map((x) => x.p50))),
+    latencyP95: Math.round(mean(q.map((x) => x.p95))),
+    mos: Number(mean(q.map((x) => x.mos)).toFixed(1)),
+    jitter: Math.round(mean(q.map((x) => x.jitter))),
+    asr: Math.round(mean(q.map((x) => x.asr))),
+    bargeIns: Number(mean(q.map((x) => x.bargeIns)).toFixed(1)),
+    // El redondeo aplana la comparacion entre periodos: la tendencia usa el promedio exacto
+    mosRaw: mean(q.map((x) => x.mos)),
+    asrRaw: mean(q.map((x) => x.asr)),
   };
+}
+
+/* Serie diaria para cruzar resolución y latencia: si el agente tarda, se resuelve peor */
+export function successVsLatency(rangeId) {
+  const { days } = rangeById(rangeId);
+  const step = Math.max(1, Math.ceil(days / 12));
+  const buckets = [];
+
+  for (let start = 0; start < days; start += step) {
+    const slice = calls.filter((c) => c.daysAgo >= start && c.daysAgo < start + step && !c.live);
+    if (!slice.length) continue;
+    const q = slice.map(callQuality);
+    buckets.push({
+      label: start === 0 ? "Hoy" : step === 1 ? `-${start}d` : `-${start + step - 1}d`,
+      success: pct(slice.filter((c) => c.outcome === "resolved").length, slice.length),
+      latency: Math.round(mean(q.map((x) => x.p50))),
+      calls: slice.length,
+    });
+  }
+  return buckets.reverse();
 }
 
 export function metrics(rangeId) {
@@ -86,6 +136,9 @@ export function metrics(rangeId) {
       escalated: change(now.escalated, before.escalated),
       automation: change(now.automation, before.automation),
       avgSeconds: change(now.avgSeconds, before.avgSeconds),
+      latency: change(now.latency, before.latency),
+      mos: change(now.mosRaw, before.mosRaw),
+      asr: change(now.asrRaw, before.asrRaw),
     },
   };
 }
