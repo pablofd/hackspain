@@ -1824,6 +1824,36 @@ test("privacy review never rewrites an already accepted authorization refusal", 
   assert.deepEqual(h.writes, [{ call_id: "real-call-from-start", reason: "caller_not_authorised" }]);
 });
 
+test("an accepted cancellation is not polluted by an out-of-scope farewell after a declined offer", async () => {
+  let turn = 1;
+  const gate = new ConfirmationGate(() => turn, new AbortController().signal);
+  const h = harness({
+    beforeConfirmation: (turn) => gate.review(turn),
+    beforeOutcome: (turn, reason, context) => gate.reviewOutcome(turn, reason, context),
+  });
+  await identify(h);
+  await h.execute("list_appointments", { patient_id: patient.patient_id });
+  const proposal = z.object({ proposal_id: z.string() }).parse(
+    await h.execute("prepare_action", { request: { action: "CANCEL", appointment_id: appointment.appointment_id } }),
+  );
+  h.nextTurn();
+  turn = 2;
+  gate.observe(2, "Yes, please cancel that appointment.");
+  await h.execute("confirm_action", { proposal_id: proposal.proposal_id, confirmed: true });
+  h.nextTurn();
+  turn = 3;
+  const availability = z.object({ request_id: z.string() }).parse(
+    await h.execute("search_availability", { patient_id: patient.patient_id, specialty_id: "general_practice" }),
+  );
+  gate.observe(3, "I'll leave it for now, thanks.");
+  await assert.rejects(h.execute("report_outcome", {
+    action: "NO_ACTION", reason: "out_of_scope", request_id: availability.request_id,
+  }), { code: "outcome_reason_not_supported" });
+  assert.deepEqual(h.writes, [{ call_id: "real-call-from-start", appointment_id: appointment.appointment_id }]);
+  assert.deepEqual(h.requests.filter((url) => url.pathname.startsWith("/api/v1/submit/")).map((url) => url.pathname),
+    ["/api/v1/submit/cancel"]);
+});
+
 test("Nearest Site skips a closer site that cannot serve the request and uses the next viable one", async () => {
   const h = harness({
     clinic: {

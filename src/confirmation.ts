@@ -73,11 +73,14 @@ function hasBookingSelection(text: string): boolean {
 }
 
 function isPlainBookingDeferral(text: string): boolean {
-  const normalized = normalizeTranscript(text).replace(/[.!?,;]+/g, " ").replace(/\s+/g, " ").trim();
-  return /^(?:(?:ah right|right|okay|ok|well)\s+)?(?:i(?:'ll| will)|we(?:'ll| will))\s+(?:hold off|wait)(?:\s+(?:then|for now|on booking))?(?:\s+(?:thank you|thanks|goodbye))?$/.test(normalized) ||
+  const normalized = normalizeTranscript(text).replace(/[.!?,;]+/g, " ").replace(/\s+/g, " ").trim()
+    .replace(/^(?:no\s+)?that (?:doesn't|does not|wouldn't|would not|won't|will not) work\s+/, "");
+  return /^(?:(?:ah right|right|okay|ok|well|no thanks|no thank you)\s+)?(?:i(?:'ll| will)|we(?:'ll| will))\s+(?:hold off|wait|leave (?:it|that|this|booking|the booking|the appointment)|pass(?: on (?:it|that|booking))?)(?:\s+(?:then|for now|on booking|today|this time))?(?:\s+(?:thank you|thanks|goodbye))?$/.test(normalized) ||
     /^(?:i|we)\s+(?:need|want|have)\s+to\s+(?:know|check|confirm)\s+(?:what|how much)\s+(?:it(?:'ll| will)|this appointment will)\s+cost\s+(?:me|us)\s+(?:first|before booking)(?:\s+(?:thank you|thanks|goodbye))?$/.test(normalized) ||
     /^(?:prefiero|prefereixo)\s+esperar(?:\s+(?:por ahora|de momento|per ara|de moment))?(?:\s+(?:gracias|gracies|adios|adeu))?$/.test(normalized) ||
-    /^(?:necesito|necessito)\s+saber\s+(?:cuanto|quant)\s+(?:me|em)\s+(?:costara|costaria)\s+(?:primero|primer|antes de reservar|abans de reservar)(?:\s+(?:gracias|gracies|adios|adeu))?$/.test(normalized);
+    /^(?:necesito|necessito)\s+saber\s+(?:cuanto|quant)\s+(?:me|em)\s+(?:costara|costaria)\s+(?:primero|primer|antes de reservar|abans de reservar)(?:\s+(?:gracias|gracies|adios|adeu))?$/.test(normalized) ||
+    /^(?:lo (?:dejo|dejamos)|dejalo|dejemoslo)(?:\s+(?:por ahora|de momento|por el momento))?(?:\s+(?:gracias|adios))?$/.test(normalized) ||
+    /^(?:ho (?:deixo|deixem)|deixa-ho)(?:\s+(?:per ara|de moment))?(?:\s+(?:gracies|adeu))?$/.test(normalized);
 }
 
 export function hasUnresolvedQualification(text: string): boolean {

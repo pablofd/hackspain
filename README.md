@@ -172,6 +172,11 @@ The tool layer keeps state per call, separate from the language model:
   third-party scheduling keeps its normal verification and authorization
   behavior; explicit new scheduling intent clears the older privacy context.
   Do not keep requesting identifiers as a way to unlock a privacy-only request.
+  A caller leaving an available offer for another time is not `out_of_scope`
+  or `caller_not_authorised`. This includes polite EN/ES/CA endings after an
+  already accepted cancellation: keep the received `CANCEL`, rather than
+  appending a farewell `NO_ACTION`. Actual restrictions on a separate booking
+  still use the existing request-scoped evidence rules.
 
 ## Documented problem workflows
 
