@@ -29,7 +29,10 @@ export function render() {
   const board = el("div", { class: "config-board" }, panel, statusHost);
 
   function paintStatus() {
-    if (statusOpen) mount(statusHost, statusCard(state));
+    if (!statusOpen) return;
+    const current = statusHost.firstElementChild;
+    if (current?.update) current.update(state);
+    else mount(statusHost, statusCard(state));
   }
 
   const tabsBar = el(

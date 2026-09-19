@@ -1451,9 +1451,12 @@ table.data .cell-sub {
 }
 
 .status {
+  position: relative;
   border: 1px solid var(--stroke-soft);
   background: var(--white);
+  box-shadow: var(--shadow-md);
   animation: signals-in var(--dur) var(--ease-out) both;
+  overflow: hidden;
 }
 
 .status__head {
@@ -1467,6 +1470,25 @@ table.data .cell-sub {
   position: relative;
   z-index: 1;
 }
+
+.status__eq {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 18px;
+  margin-left: auto;
+}
+
+.status__eq i {
+  width: 2px;
+  height: 5px;
+  background: rgba(var(--white-rgb), 0.8);
+  animation: eq 1.4s var(--ease-in-out) infinite;
+}
+.status__eq i:nth-child(2) { animation-delay: 0.12s; }
+.status__eq i:nth-child(3) { animation-delay: 0.26s; }
+.status__eq i:nth-child(4) { animation-delay: 0.4s; }
+.status__eq i:nth-child(5) { animation-delay: 0.54s; }
 
 .status__logo {
   width: 26px;
@@ -1489,7 +1511,14 @@ table.data .cell-sub {
 }
 
 .status__body {
-  padding: var(--sp-4) var(--sp-4) var(--sp-2);
+  position: relative;
+  padding: var(--sp-4) var(--sp-4) var(--sp-3);
+  background-color: var(--parchment);
+  background-image:
+    linear-gradient(rgba(var(--ink-rgb), 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--ink-rgb), 0.045) 1px, transparent 1px);
+  background-size: 22px 22px;
+  border-bottom: 1px solid var(--hairline);
 }
 
 .status__radar {
@@ -1498,10 +1527,34 @@ table.data .cell-sub {
   display: block;
 }
 
+.status__sweep {
+  animation: sweep 7s linear infinite;
+}
+
+@keyframes sweep {
+  to { transform: rotate(360deg); }
+}
+
+.status__ping {
+  transform-origin: center;
+  animation: ping 2.6s var(--ease-out) infinite;
+}
+
+@keyframes ping {
+  0% { r: 3; opacity: 0.5; }
+  70% { r: 46; opacity: 0; }
+  100% { r: 46; opacity: 0; }
+}
+
+.status__shape {
+  filter: drop-shadow(0 2px 6px rgba(var(--ink-rgb), 0.18));
+}
+
 .status__axis {
   font-size: 9.5px;
-  fill: var(--text-muted);
+  fill: var(--text-secondary);
   font-family: var(--font-ui);
+  letter-spacing: 0.02em;
 }
 
 .status__grid {
@@ -1509,8 +1562,8 @@ table.data .cell-sub {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
   margin-top: var(--sp-3);
-  background: var(--hairline);
-  border: 1px solid var(--hairline);
+  background: rgba(var(--ink-rgb), 0.09);
+  border: 1px solid rgba(var(--ink-rgb), 0.09);
 }
 
 .status__cell {
@@ -1518,7 +1571,7 @@ table.data .cell-sub {
   align-items: baseline;
   gap: var(--sp-2);
   padding: 7px 10px;
-  background: var(--white);
+  background: rgba(var(--white-rgb), 0.86);
 }
 
 .status__cell-label {
@@ -1532,9 +1585,39 @@ table.data .cell-sub {
   color: var(--text-primary);
 }
 
+.status__stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid var(--hairline);
+}
+
+.status__stat {
+  padding: var(--sp-3) var(--sp-4);
+  border-right: 1px solid var(--hairline);
+}
+
+.status__stat:last-child {
+  border-right: 0;
+}
+
+.status__stat span {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+
+.status__stat strong {
+  font-size: 17px;
+  font-weight: var(--fw-regular);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
 .status__notes {
-  padding: var(--sp-4) var(--sp-5) var(--sp-5);
-  border-top: 1px solid var(--hairline);
+  padding: var(--sp-4) var(--sp-5);
 }
 
 .status__note {
@@ -1544,6 +1627,12 @@ table.data .cell-sub {
   line-height: 1.5;
   color: var(--text-secondary);
   margin-bottom: 9px;
+  animation: note-in var(--dur) var(--ease-out) both;
+}
+
+@keyframes note-in {
+  from { opacity: 0; transform: translateX(6px); }
+  to { opacity: 1; transform: none; }
 }
 
 .status__note:last-child {
@@ -1556,6 +1645,17 @@ table.data .cell-sub {
   flex: none;
   margin-top: 7px;
   background: var(--dusty-denim);
+}
+
+.status__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 10px var(--sp-5);
+  border-top: 1px solid var(--hairline);
+  background: var(--parchment);
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 /* --- Deslizador ------------------------------------------- */
