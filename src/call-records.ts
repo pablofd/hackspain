@@ -13,8 +13,8 @@ import { AppError } from "./errors.js";
 
 export type CallRecordEvent =
   // Assistant text describes generated audio, not verified playback; retain interruptions alongside it.
-  | { type: "transcript"; speaker: "user" | "assistant"; itemId: string; text: string }
-  | { type: "interruption"; itemId?: string; audioEndMs?: number }
+  | { type: "transcript"; speaker: "user" | "assistant"; itemId: string; text: string; partial?: boolean }
+  | { type: "interruption"; itemId?: string; audioEndMs?: number; reason?: "caller" | "output_limit" | "provider_cancelled" }
   | { type: "tool"; name: string; status: "ok" | "error"; code?: string; details?: unknown }
   | {
     type: "action";
@@ -252,7 +252,13 @@ function eventFields(event: CallRecordEvent): Record<string, unknown> {
       if (event.speaker !== "user" && event.speaker !== "assistant") {
         throw new RecordFailure("call_recording_invalid_event");
       }
-      return { type: event.type, speaker: event.speaker, itemId: event.itemId, text: event.text };
+      if (event.partial !== undefined && typeof event.partial !== "boolean") {
+        throw new RecordFailure("call_recording_invalid_event");
+      }
+      return {
+        type: event.type, speaker: event.speaker, itemId: event.itemId, text: event.text,
+        ...(event.partial === undefined ? {} : { partial: event.partial }),
+      };
     case "interruption": {
       const fields: Record<string, unknown> = { type: event.type };
       if (event.itemId !== undefined) {
@@ -264,6 +270,12 @@ function eventFields(event: CallRecordEvent): Record<string, unknown> {
           throw new RecordFailure("call_recording_invalid_event");
         }
         fields.audioEndMs = event.audioEndMs;
+      }
+      if (event.reason !== undefined) {
+        if (!["caller", "output_limit", "provider_cancelled"].includes(event.reason)) {
+          throw new RecordFailure("call_recording_invalid_event");
+        }
+        fields.reason = event.reason;
       }
       return fields;
     }

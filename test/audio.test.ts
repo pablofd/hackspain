@@ -91,6 +91,25 @@ test("interrupting a completed silence tail does not truncate or resurrect alrea
   assert.equal(queue.next(), undefined);
 });
 
+test("interruption reports played and every queued unheard item for complete context truncation", () => {
+  const queue = new AudioQueue();
+  queue.push({ audio: Buffer.alloc(320, 0x80), itemId: "playing", contentIndex: 0 });
+  queue.finish("playing");
+  queue.push({ audio: Buffer.alloc(160, 0x82), itemId: "unheard", contentIndex: 0 });
+  queue.push({ audio: Buffer.alloc(80, 0x83), itemId: "partial-unheard", contentIndex: 0 });
+  queue.next();
+  assert.deepEqual(queue.interruptAll(), [
+    { itemId: "playing", contentIndex: 0, audioEndMs: 20 },
+    { itemId: "unheard", contentIndex: 0, audioEndMs: 0 },
+    { itemId: "partial-unheard", contentIndex: 0, audioEndMs: 0 },
+  ]);
+  for (const itemId of ["playing", "unheard", "partial-unheard"]) {
+    queue.push({ audio: Buffer.alloc(160, 0x84), itemId, contentIndex: 0 });
+  }
+  assert.equal(queue.next(), undefined);
+  assert.deepEqual(queue.interruptAll(), []);
+});
+
 test("switching items pads the previous tail without mixing their samples", () => {
   const queue = new AudioQueue();
   queue.push({ audio: Buffer.alloc(81, 0x80), itemId: "first", contentIndex: 0 });

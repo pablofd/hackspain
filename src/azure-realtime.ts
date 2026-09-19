@@ -19,7 +19,7 @@ export interface VoiceContext {
   greet: boolean;
   onAudio: (chunk: AudioChunk) => void;
   onAudioDone: (itemId: string) => void;
-  onInterrupt: () => PlayedAudio | undefined;
+  onInterrupt: () => readonly PlayedAudio[] | undefined;
   onFailure: (error: AppError) => void;
   onTurnDone: () => void;
   startedAt?: Date;
@@ -46,6 +46,7 @@ interface ResponseTurn {
   interrupted: boolean;
   done: boolean;
   jobs: Promise<void>[];
+  transcripts: Map<string, string>;
   cancelEventId?: string;
 }
 
@@ -124,18 +125,22 @@ export function createAzureVoiceFactory(
       const toolCallIds = new Set<string>();
       const cancelEvents = new Set<string>();
       const operations = new AbortController();
+      const overflowRecoveryGenerations = new Set<number>();
       let ready = false;
       let closed = false;
       let generation = 0;
       let userSpeaking = false;
       let pendingResponse: number | undefined;
       let pendingTools = 0;
+      let pendingRecovery: { generation: number; instructions: string } | undefined;
       let cancelSequence = 0;
       let greetingPending = call.greet;
+      let greetingInputSeen = false;
       let greetingTimer: NodeJS.Timeout | undefined;
       let closePromise: Promise<void> | undefined;
       let toolQueue = Promise.resolve();
       const startedAt = call.startedAt ?? new Date();
+      const instructions = receptionistInstructions(startedAt, call.allowSubmissions === true);
       const record = (event: CallRecordEvent) => call.onRecord?.(event);
       const callerItemTurns = new Map<string, number>();
       const confirmation = new ConfirmationGate(() => generation, AbortSignal.any([call.signal, operations.signal]));
@@ -162,15 +167,38 @@ export function createAzureVoiceFactory(
         clearTimeout(greetingTimer);
       }
 
+      function scheduleGreeting(waitMs = 0): void {
+        clearTimeout(greetingTimer);
+        greetingTimer = setTimeout(() => {
+          if (!greetingPending) return;
+          dismissGreeting();
+          try {
+            createResponse("Start in English. Give one short greeting identifying yourself as Clinica Arenal's virtual assistant and ask: How can I help you today? Then wait for the caller. Ask no additional questions in this opening.");
+          } catch (error) {
+            fail(new AppError(errorCode(error)));
+          }
+        }, waitMs);
+      }
+
       function hasActiveResponse(): boolean {
         return [...turns.values()].some((turn) => !turn.done);
       }
 
-      function createResponse(instructions?: string): void {
+      function createResponse(instructions?: string): boolean {
         if (closed || !ready || userSpeaking || pendingResponse !== undefined ||
-            hasActiveResponse() || pendingTools) return;
+            hasActiveResponse() || pendingTools) return false;
         pendingResponse = generation;
         send({ type: "response.create", ...(instructions ? { response: { instructions } } : {}) });
+        return true;
+      }
+
+      function resumeRecovery(): void {
+        if (!pendingRecovery) return;
+        if (pendingRecovery.generation !== generation) {
+          pendingRecovery = undefined;
+          return;
+        }
+        if (createResponse(pendingRecovery.instructions)) pendingRecovery = undefined;
       }
 
       function cancelResponse(id: string, turn: ResponseTurn): void {
@@ -182,13 +210,16 @@ export function createAzureVoiceFactory(
         send({ type: "response.cancel", response_id: id, event_id: turn.cancelEventId });
       }
 
-      function interruptPlayback(): void {
-        const played = call.onInterrupt();
-        record({
-          type: "interruption",
-          ...(played ? { itemId: played.itemId, audioEndMs: played.audioEndMs } : {}),
-        });
-        if (played) {
+      function interruptPlayback(
+        reason: "caller" | "output_limit" | "provider_cancelled",
+        unheard?: PlayedAudio,
+      ): void {
+        const discarded = [...(call.onInterrupt() ?? [])];
+        if (unheard && !discarded.some((item) =>
+          item.itemId === unheard.itemId && item.contentIndex === unheard.contentIndex)) discarded.push(unheard);
+        if (!discarded.length) record({ type: "interruption", reason });
+        for (const played of discarded) {
+          record({ type: "interruption", itemId: played.itemId, audioEndMs: played.audioEndMs, reason });
           send({
             type: "conversation.item.truncate",
             item_id: played.itemId,
@@ -196,6 +227,13 @@ export function createAzureVoiceFactory(
             audio_end_ms: played.audioEndMs,
           });
         }
+      }
+
+      function recordPartialTranscripts(turn: ResponseTurn): void {
+        for (const [itemId, text] of turn.transcripts) {
+          if (text) record({ type: "transcript", speaker: "assistant", itemId, text, partial: true });
+        }
+        turn.transcripts.clear();
       }
 
       function audibleTurn(responseId: string): boolean {
@@ -207,6 +245,7 @@ export function createAzureVoiceFactory(
       function cleanup(): void {
         clearTimeout(deadline);
         dismissGreeting();
+        pendingRecovery = undefined;
         call.signal.removeEventListener("abort", onAbort);
         for (const { span, done } of turns.values()) {
           if (done) continue;
@@ -228,8 +267,12 @@ export function createAzureVoiceFactory(
           if (!ready) throw new AppError("azure_not_ready");
           const audio = decodeAudio(payload);
           if (audio.length !== 160) throw new AppError("unsupported_audio_frame_size");
-          // Startup frames are flushed by the caller before the deferred greeting.
-          if (greetingPending && audio.some((sample) => sample !== 0xff && sample !== 0x7f)) dismissGreeting();
+          // Give buffered speech time to reach VAD, without letting ambient noise suppress the greeting.
+          if (greetingPending && !greetingInputSeen &&
+              audio.some((sample) => sample !== 0xff && sample !== 0x7f)) {
+            greetingInputSeen = true;
+            scheduleGreeting(500);
+          }
           send({ type: "input_audio_buffer.append", audio: payload });
         },
         sendText(text) {
@@ -295,7 +338,7 @@ export function createAzureVoiceFactory(
           if (stale()) {
             output = {
               error: "stale_turn",
-              instruction: "The caller interrupted this turn. Follow their latest request. Use get_call_state to check any already-confirmed actions before proceeding.",
+              instruction: "This response was interrupted. Follow the latest caller request. Use get_call_state to check any already-confirmed actions before proceeding.",
             };
           }
           send({
@@ -314,17 +357,7 @@ export function createAzureVoiceFactory(
             ready = true;
             clearTimeout(deadline);
             resolve(session);
-            if (greetingPending) {
-              greetingTimer = setTimeout(() => {
-                if (!greetingPending) return;
-                dismissGreeting();
-                try {
-                  createResponse("Start in English. Give one short greeting identifying yourself as Clinica Arenal's virtual assistant and ask: How can I help you today? Then wait for the caller. Ask no additional questions in this opening.");
-                } catch (error) {
-                  fail(new AppError(errorCode(error)));
-                }
-              }, 0);
-            }
+            if (greetingPending) scheduleGreeting();
             break;
           case "error": {
             const details = z.object({ error: z.object({
@@ -339,11 +372,29 @@ export function createAzureVoiceFactory(
           case "response.audio.delta": {
             const audio = audioSchema.parse(event);
             if (!audibleTurn(audio.response_id)) break;
-            call.onAudio({
-              audio: decodeAudio(audio.delta),
-              itemId: audio.item_id,
-              contentIndex: audio.content_index,
-            });
+            try {
+              call.onAudio({
+                audio: decodeAudio(audio.delta),
+                itemId: audio.item_id,
+                contentIndex: audio.content_index,
+              });
+            } catch (error) {
+              if (!(error instanceof AppError) || error.code !== "audio_output_backpressure" ||
+                  overflowRecoveryGenerations.has(generation)) throw error;
+              overflowRecoveryGenerations.add(generation);
+              const turn = turns.get(audio.response_id)!;
+              record({ type: "error", code: "audio_output_recovery" });
+              log("warn", "voice.audio_output_recovery", { callId: call.callId });
+              recordPartialTranscripts(turn);
+              pendingRecovery = {
+                generation,
+                instructions: `${instructions}\nThe previous spoken response exceeded the bounded playback queue and was interrupted. Recover with at most 40 spoken words: give only the selected final offer or one short necessary question, then wait. Use get_call_state if needed; preserve already accepted actions and continue only unresolved requests. Never resubmit a different payload, infer consent, or skip validation to recover.`,
+              };
+              cancelResponse(audio.response_id, turn);
+              interruptPlayback("output_limit", {
+                itemId: audio.item_id, contentIndex: audio.content_index, audioEndMs: 0,
+              });
+            }
             break;
           }
           case "response.audio.done": {
@@ -358,8 +409,20 @@ export function createAzureVoiceFactory(
             record({ type: "transcript", speaker: "user", itemId: transcript.item_id, text: transcript.transcript });
             break;
           }
+          case "response.audio_transcript.delta": {
+            const transcript = z.object({
+              response_id: z.string(), item_id: z.string(), delta: z.string().max(32_000),
+            }).parse(event);
+            const turn = turns.get(transcript.response_id);
+            if (turn && !turn.done && !turn.interrupted) {
+              turn.transcripts.set(transcript.item_id,
+                ((turn.transcripts.get(transcript.item_id) ?? "") + transcript.delta).slice(0, 8000));
+            }
+            break;
+          }
           case "response.audio_transcript.done": {
             const transcript = z.object({ item_id: z.string(), transcript: z.string() }).parse(event);
+            for (const turn of turns.values()) turn.transcripts.delete(transcript.item_id);
             record({ type: "transcript", speaker: "assistant", itemId: transcript.item_id, text: transcript.transcript });
             break;
           }
@@ -375,12 +438,13 @@ export function createAzureVoiceFactory(
           case "input_audio_buffer.speech_started": {
             if (userSpeaking) break;
             generation += 1;
+            pendingRecovery = undefined;
             if (typeof event.item_id === "string") callerItemTurns.set(event.item_id, generation);
             for (const [item, turn] of callerItemTurns) if (turn < generation - 2) callerItemTurns.delete(item);
             userSpeaking = true;
             dismissGreeting();
             for (const [id, turn] of turns) cancelResponse(id, turn);
-            interruptPlayback();
+            interruptPlayback("caller");
             break;
           }
           case "input_audio_buffer.speech_stopped":
@@ -401,7 +465,7 @@ export function createAzureVoiceFactory(
               },
             }, call.parent);
             const turn: ResponseTurn = {
-              span, generation: version, interrupted: false, done: false, jobs: [],
+              span, generation: version, interrupted: false, done: false, jobs: [], transcripts: new Map(),
             };
             turns.set(response.id, turn);
             if (version !== generation || userSpeaking) cancelResponse(response.id, turn);
@@ -419,7 +483,10 @@ export function createAzureVoiceFactory(
             if (toolCallIds.size >= 64) throw new AppError("tool_call_limit");
             toolCallIds.add(tool.call_id);
             pendingTools += 1;
-            const job = toolQueue.then(() => runTool(tool, turn)).finally(() => { pendingTools -= 1; });
+            const job = toolQueue.then(() => runTool(tool, turn)).finally(() => {
+              pendingTools -= 1;
+              resumeRecovery();
+            });
             toolQueue = job;
             turn.jobs.push(job);
             // Observe rejection immediately, even before response.done arrives.
@@ -434,7 +501,7 @@ export function createAzureVoiceFactory(
             if (response.status === "in_progress") throw new AppError("azure_invalid_event");
             if (response.status === "cancelled" && !turn.interrupted && turn.generation === generation) {
               turn.interrupted = true;
-              interruptPlayback();
+              interruptPlayback("provider_cancelled");
             }
             turn.done = true;
             const { span, generation: version } = turn;
@@ -450,10 +517,12 @@ export function createAzureVoiceFactory(
                 ? SpanStatusCode.ERROR : SpanStatusCode.OK,
             });
             span.end();
+            recordPartialTranscripts(turn);
             if (response.status === "failed" || response.status === "incomplete") {
               throw new AppError(`azure_response_${response.status}`);
             }
             if (turn.jobs.length) await Promise.all(turn.jobs);
+            resumeRecovery();
             if (closed || userSpeaking || turn.interrupted || generation !== version ||
                 response.status !== "completed") break;
             if (turn.jobs.length) {
@@ -475,7 +544,7 @@ export function createAzureVoiceFactory(
             output_audio_format: "g711_ulaw",
             input_audio_transcription: { model: config.AZURE_OPENAI_TRANSCRIPTION_MODEL },
             turn_detection: { type: "semantic_vad", eagerness: "auto" },
-            instructions: receptionistInstructions(startedAt, call.allowSubmissions === true),
+            instructions,
             tools: receptionistTools,
             tool_choice: "auto",
             temperature: 0.8,

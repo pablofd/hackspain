@@ -64,7 +64,9 @@ test("records lifecycle and all supported events as private append-only NDJSON",
   const events: CallRecordEvent[] = [
     { type: "transcript", speaker: "user", itemId: "input-1", text: "synthetic input" },
     { type: "transcript", speaker: "assistant", itemId: "output-1", text: "synthetic output" },
+    { type: "transcript", speaker: "assistant", itemId: "partial-output", text: "unfinished synthetic output", partial: true },
     { type: "interruption", itemId: "output-1", audioEndMs: 12.5 },
+    { type: "interruption", itemId: "partial-output", audioEndMs: 0, reason: "output_limit" },
     { type: "interruption" },
     { type: "tool", name: "availability", status: "ok" },
     { type: "tool", name: "booking", status: "error", code: "test_failure" },
@@ -91,6 +93,8 @@ test("records lifecycle and all supported events as private append-only NDJSON",
   }
   assert.equal(data[0]?.timestamp, STARTED_AT.toISOString());
   assert.equal(data[0]?.assistantTranscriptSource, "generated_audio");
+  assert.equal(data.find((row) => row.itemId === "partial-output" && row.type === "transcript")?.partial, true);
+  assert.equal(data.find((row) => row.itemId === "partial-output" && row.type === "interruption")?.reason, "output_limit");
   assert.equal(data.at(-1)?.inputBytes, FINISH.inputBytes);
   assert.equal(data.at(-1)?.outputBytes, FINISH.outputBytes);
   assert.equal(fs.statSync(directory).mode & 0o777, 0o700);

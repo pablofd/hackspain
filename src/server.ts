@@ -190,7 +190,7 @@ export function createVoiceServer(
             onAudioDone: (item) => { if (!closed) audio.finish(item); },
             onInterrupt: () => {
               span?.addEvent("voice.interrupted");
-              return audio.interrupt();
+              return audio.interruptAll();
             },
             onFailure: fail,
             onTurnDone: () => span?.addEvent("voice.turn_completed"),

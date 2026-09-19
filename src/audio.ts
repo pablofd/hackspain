@@ -98,12 +98,24 @@ export class AudioQueue {
   }
 
   interrupt(): PlayedAudio | undefined {
+    return this.interruptAll()[0];
+  }
+
+  interruptAll(): PlayedAudio[] {
     const first = this.frames[0] ?? this.remainder;
     const played = this.lastPlayed &&
       (!this.finished.has(this.lastPlayed.itemId) ||
         (first?.itemId === this.lastPlayed.itemId && first.contentIndex === this.lastPlayed.contentIndex))
       ? this.lastPlayed
       : first ? { itemId: first.itemId, contentIndex: first.contentIndex, audioEndMs: 0 } : undefined;
+    const discarded = new Map<string, PlayedAudio>();
+    if (played) discarded.set(`${played.itemId}:${played.contentIndex}`, played);
+    for (const chunk of [...this.frames, ...(this.remainder ? [this.remainder] : [])]) {
+      const key = `${chunk.itemId}:${chunk.contentIndex}`;
+      if (!discarded.has(key)) {
+        discarded.set(key, { itemId: chunk.itemId, contentIndex: chunk.contentIndex, audioEndMs: 0 });
+      }
+    }
     for (const frame of this.frames) this.interrupted.add(frame.itemId);
     if (this.remainder) this.interrupted.add(this.remainder.itemId);
     if (played) this.interrupted.add(played.itemId);
@@ -112,6 +124,6 @@ export class AudioQueue {
     this.lastPlayed = undefined;
     this.playedSamples = 0;
     this.silenceFramesRemaining = 0;
-    return played;
+    return [...discarded.values()];
   }
 }

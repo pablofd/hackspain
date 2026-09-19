@@ -7,6 +7,7 @@ import { actionSchema, type Availability, type ProsperAction, type Slot, type Pa
 import type { AddressResolver } from "../src/geography.js";
 import { ConfirmationGate } from "../src/confirmation.js";
 import { Receptionist, receptionistInstructions, receptionistTools } from "../src/receptionist.js";
+import { registrationReadbackGuidance } from "../src/registration.js";
 
 const patient: Patient = {
   patient_id: "PTEST", given_name: "Ana", first_surname: "Prueba", second_surname: "Test",
@@ -40,6 +41,11 @@ const appointment = {
   appointment_id: "ATEST", patient_id: "PTEST", provider_id: "PRTEST", location_id: "centro",
   appointment_type_id: "review", start_time: "2026-09-25T10:00:00+02:00", duration_minutes: 15,
 };
+const registrationDetails = {
+  given_name: patient.given_name, first_surname: patient.first_surname, second_surname: patient.second_surname,
+  national_id: patient.national_id, date_of_birth: patient.date_of_birth, phone: patient.phone,
+  email: "synthetic.patient@example.test", insurer: patient.insurer,
+};
 
 function harness(options: {
   callId?: string;
@@ -54,6 +60,7 @@ function harness(options: {
   addressResolver?: Pick<AddressResolver, "resolve">;
   startedAt?: Date;
   beforeConfirmation?: (turn: number) => Promise<void>;
+  beforeOutcome?: (turn: number, reason: string) => Promise<void>;
 } = {}) {
   let turn = 1;
   const controller = new AbortController();
@@ -97,6 +104,7 @@ function harness(options: {
     allowSubmissions: options.allowSubmissions ?? true, generation: () => turn,
     record: (event) => records.push(event),
     ...(options.beforeConfirmation ? { beforeConfirmation: options.beforeConfirmation } : {}),
+    ...(options.beforeOutcome ? { beforeOutcome: options.beforeOutcome } : {}),
   }, options.addressResolver);
   const execute = (name: string, args: unknown) => engine.execute(name, JSON.stringify(args), turn);
   return { engine, execute, nextTurn: () => { turn += 1; }, writes, requests, records, controller };
@@ -121,6 +129,50 @@ async function proposeBooking(h: ReturnType<typeof harness>): Promise<string> {
   );
   assert.equal(h.writes.length, 0);
   return proposal.proposal_id;
+}
+
+async function proposeScheduling(
+  h: ReturnType<typeof harness>, action: "BOOK" | "RESCHEDULE", search: Record<string, unknown> = {},
+) {
+  await identify(h);
+  if (action === "RESCHEDULE") await h.execute("list_appointments", { patient_id: patient.patient_id });
+  const result = z.object({
+    request_id: z.string(), slots: z.array(z.object({ slot_id: z.string() })),
+  }).parse(await h.execute("search_availability", {
+    patient_id: patient.patient_id, specialty_id: slot.specialty_id, ...search,
+  }));
+  const slotId = result.slots[0]?.slot_id;
+  const request = action === "BOOK"
+    ? { action, patient_id: patient.patient_id, slot_id: slotId, policy_id: patient.insurer }
+    : { action, appointment_id: appointment.appointment_id, slot_id: slotId, policy_id: patient.insurer };
+  const proposal = z.object({ proposal_id: z.string() }).parse(await h.execute("prepare_action", { request }));
+  return { ...proposal, request_id: result.request_id, request };
+}
+
+const bookingSearchSchema = z.object({
+  request_id: z.string(),
+  slots: z.array(z.object({ slot_id: z.string(), start_time: z.string(), payable_with: z.array(z.string()) })),
+  booking_proposal: z.object({
+    proposal_id: z.string(), request_id: z.string(), slot_id: z.string(),
+    action: actionSchema, submitted: z.literal(false), instruction: z.string(),
+  }).passthrough().nullable(),
+  submitted: z.literal(false),
+  pricing_status: z.literal("not_supplied"),
+  searched_from: z.string(),
+  no_booking: z.object({
+    reason_candidates: z.array(z.string()), submitted: z.literal(false),
+    next_day_search: z.object({
+      patient_id: z.string(), request_id: z.string(), advance_day: z.literal(true),
+      prepare_booking: z.literal(true).optional(),
+    }).optional(),
+  }).nullable(),
+  instruction: z.string(),
+});
+
+async function searchBooking(h: ReturnType<typeof harness>, input: Record<string, unknown> = {}) {
+  return bookingSearchSchema.parse(await h.execute("search_availability", {
+    patient_id: patient.patient_id, specialty_id: slot.specialty_id, prepare_booking: true, ...input,
+  }));
 }
 
 test("a booking submits the exact API slot and callSid only after a new confirmed turn", async () => {
@@ -1052,4 +1104,825 @@ test("private tool diagnostics record resolved query dates and decisions without
   const serialized = JSON.stringify(tools);
   assert.ok(!serialized.includes(patient.national_id));
   assert.ok(!serialized.includes(patient.phone));
+});
+
+test("fresh appointment proposals cannot bypass a patient's possible-emergency block", async () => {
+  for (const action of ["BOOK", "RESCHEDULE"] as const) {
+    for (const failed of [false, true]) {
+      const h = harness({ post: async () => new Response(null, { status: 422 }) });
+      const draft = await proposeScheduling(h, action);
+      h.nextTurn();
+      if (failed) {
+        await assert.rejects(h.execute("confirm_action", { proposal_id: draft.proposal_id, confirmed: true }),
+          { code: "prosper_http_422" });
+        h.nextTurn();
+      }
+      await h.execute("resolve_request", {
+        patient_id: patient.patient_id, complaint: "I might have chest pain and struggle to breathe.",
+        complaint_context: "uncertain",
+      });
+      await assert.rejects(h.execute("confirm_action", { proposal_id: draft.proposal_id, confirmed: true }),
+        { code: "request_needs_clarification" });
+      await assert.rejects(h.execute("prepare_action", { request: draft.request }),
+        { code: "request_needs_clarification" });
+      assert.equal(h.writes.length, failed ? 1 : 0);
+    }
+  }
+});
+
+test("a terminal request outcome removes only its unconfirmed scheduling drafts", async () => {
+  for (const action of ["BOOK", "RESCHEDULE"] as const) {
+    const h = harness();
+    const refused = await proposeScheduling(h, action);
+    const independent = await proposeScheduling(h, "BOOK", { new_request: true });
+    h.nextTurn();
+    const outcome = { request_id: refused.request_id, action: "NO_ACTION", reason: "out_of_scope" };
+    await h.execute("report_outcome", outcome);
+    const state = z.object({
+      actions: z.array(z.object({ proposal_id: z.string(), action: z.string() })),
+    }).parse(await h.execute("get_call_state", {}));
+    assert.ok(!state.actions.some((entry) => entry.proposal_id === refused.proposal_id));
+    assert.ok(state.actions.some((entry) => entry.proposal_id === independent.proposal_id));
+    await assert.rejects(h.execute("confirm_action", { proposal_id: refused.proposal_id, confirmed: true }),
+      { code: "proposal_not_found" });
+    await assert.rejects(h.execute("prepare_action", { request: refused.request }),
+      { code: "slot_not_verified" });
+    await h.execute("confirm_action", { proposal_id: independent.proposal_id, confirmed: true });
+    await h.execute("report_outcome", outcome);
+    assert.equal(h.writes.length, 2);
+    assert.equal(h.writes[0]?.reason, "out_of_scope");
+    assert.equal(h.writes[1]?.patient_id, patient.patient_id);
+  }
+});
+
+test("a scheduling proposal invalidated during confirmation review cannot be submitted", async () => {
+  let requestId = "";
+  const h = harness({ beforeConfirmation: async () => {
+    await h.execute("report_outcome", { request_id: requestId, action: "NO_ACTION", reason: "out_of_scope" });
+  } });
+  const draft = await proposeScheduling(h, "BOOK");
+  requestId = draft.request_id;
+  h.nextTurn();
+  await assert.rejects(h.execute("confirm_action", { proposal_id: draft.proposal_id, confirmed: true }),
+    { code: "proposal_not_found" });
+  assert.deepEqual(h.writes, [{ call_id: "real-call-from-start", reason: "out_of_scope" }]);
+});
+
+test("a patient safety block preserves other patients and cancellations and preflights grouped writes", async () => {
+  const other: Patient = { ...patient, patient_id: "POTHER", given_name: "Bea", national_id: "00000000T" };
+  const h = harness({
+    directory: (query) => [query.searchParams.get("national_id") === other.national_id ? other : patient],
+    appointments: [appointment, { ...appointment, appointment_id: "ATEST2" }],
+  });
+  const blocked = await proposeScheduling(h, "BOOK");
+  await h.execute("find_patient", { name: "Bea Prueba Test", national_id: other.national_id });
+  const options = z.object({ slots: z.array(z.object({ slot_id: z.string() })) }).parse(
+    await h.execute("search_availability", { patient_id: other.patient_id, specialty_id: slot.specialty_id }),
+  );
+  const independent = z.object({ proposal_id: z.string() }).parse(await h.execute("prepare_action", { request: {
+    action: "BOOK", patient_id: other.patient_id, slot_id: options.slots[0]?.slot_id, policy_id: other.insurer,
+  } }));
+  await h.execute("list_appointments", { patient_id: patient.patient_id });
+  const cancellations: string[] = [];
+  for (const appointmentId of ["ATEST", "ATEST2"]) {
+    const proposal = z.object({ proposal_id: z.string() }).parse(
+      await h.execute("prepare_action", { request: { action: "CANCEL", appointment_id: appointmentId } }),
+    );
+    cancellations.push(proposal.proposal_id);
+  }
+  h.nextTurn();
+  await h.execute("resolve_request", {
+    patient_id: patient.patient_id, complaint: "I might have chest pain and struggle to breathe.",
+    complaint_context: "uncertain",
+  });
+  await assert.rejects(h.execute("confirm_actions", {
+    proposal_ids: [independent.proposal_id, blocked.proposal_id], confirmed: true,
+  }), { code: "request_needs_clarification" });
+  assert.equal(h.writes.length, 0);
+  await h.execute("confirm_actions", {
+    proposal_ids: [independent.proposal_id, ...cancellations], confirmed: true,
+  });
+  assert.equal(h.writes.length, 3);
+  assert.equal(h.writes[0]?.patient_id, other.patient_id);
+  assert.deepEqual(h.writes.slice(1).map((body) => body.appointment_id), ["ATEST", "ATEST2"]);
+});
+
+test("accepted pending and uncertain scheduling retries remain identical after new safety concerns", async () => {
+  for (const state of ["accepted", "pending", "unknown"] as const) {
+    const started = Promise.withResolvers<void>();
+    const response = Promise.withResolvers<Response>();
+    const h = harness({ post: async (_body, attempt) => {
+      started.resolve();
+      if (state === "unknown" && attempt <= 2) throw new TypeError("uncertain delivery");
+      return state === "pending" ? response.promise : new Response(null, { status: 409 });
+    } });
+    const draft = await proposeScheduling(h, "BOOK");
+    h.nextTurn();
+    const submitting = h.execute("confirm_action", { proposal_id: draft.proposal_id, confirmed: true });
+    if (state === "pending") await started.promise;
+    else if (state === "unknown") await assert.rejects(submitting, { code: "prosper_submission_unknown" });
+    else await submitting;
+    await h.execute("resolve_request", {
+      patient_id: patient.patient_id, complaint: "I might have chest pain and struggle to breathe.",
+      complaint_context: "uncertain",
+    });
+    const retried = h.execute("confirm_action", { proposal_id: draft.proposal_id, confirmed: true });
+    response.resolve(new Response(null, { status: 409 }));
+    assert.equal(z.object({ status: z.string() }).parse(await retried).status, "duplicate");
+    if (state === "pending") await submitting;
+    assert.equal(h.writes.length, state === "unknown" ? 3 : 1);
+    for (const body of h.writes) assert.deepEqual(body, h.writes[0]);
+  }
+});
+
+test("an opt-in BOOK search prepares the first eligible slot without posting and requires a new confirming turn", async () => {
+  const earliest = { ...slot, appointment_type_id: "specialty_review", start_time: "2026-09-19T09:30:00+02:00" };
+  const h = harness({ availability: () => offered([
+    { ...slot, start_time: "2026-09-19T15:00:00+02:00" },
+    { ...slot, start_time: "2026-09-18T08:00:00+02:00" },
+    { ...slot, start_time: "2026-09-19T09:00:00+02:00", payable_with: ["privado"] },
+    earliest, slot,
+  ]) });
+  await identify(h);
+  const result = await searchBooking(h, { time_of_day: "morning" });
+  const proposal = result.booking_proposal;
+  assert.ok(proposal);
+  assert.equal(proposal.request_id, result.request_id);
+  assert.equal(proposal.slot_id, result.slots[0]?.slot_id);
+  assert.equal(result.slots[0]?.start_time, earliest.start_time);
+  assert.equal(proposal.patient_name, `${patient.given_name} ${patient.first_surname} ${patient.second_surname}`);
+  assert.equal(proposal.provider_name, clinic.providers[0]?.name);
+  assert.equal(proposal.location_name, clinic.locations[0]?.name);
+  assert.match(result.instruction, /already prepared, NOT submitted/);
+  assert.equal(h.writes.length, 0);
+  assert.ok(h.requests.every((query) => !query.searchParams.has("prepare_booking")));
+  await assert.rejects(h.execute("confirm_action", { proposal_id: proposal.proposal_id, confirmed: true }),
+    { code: "confirmation_requires_new_turn" });
+  h.nextTurn();
+  await h.execute("confirm_action", { proposal_id: proposal.proposal_id, confirmed: true });
+  assert.deepEqual(h.writes, [{
+    call_id: "real-call-from-start", patient_id: patient.patient_id,
+    provider_id: earliest.provider_id, location_id: earliest.location_id,
+    appointment_type_id: earliest.appointment_type_id, slot: earliest.start_time, policy_id: patient.insurer,
+  }]);
+  await h.execute("confirm_action", { proposal_id: proposal.proposal_id, confirmed: true });
+  assert.equal(h.writes.length, 1);
+});
+
+test("prepare_booking is invocation-only and ordinary or reschedule searches do not create BOOK drafts", async () => {
+  const h = harness();
+  await identify(h);
+  const ordinary = bookingSearchSchema.parse(await h.execute("search_availability", {
+    patient_id: patient.patient_id, specialty_id: slot.specialty_id,
+  }));
+  assert.equal(ordinary.booking_proposal, null);
+  const first = await searchBooking(h, { request_id: ordinary.request_id });
+  assert.ok(first.booking_proposal);
+  h.nextTurn();
+  const readOnly = bookingSearchSchema.parse(await h.execute("search_availability", {
+    patient_id: patient.patient_id, request_id: first.request_id,
+  }));
+  assert.equal(readOnly.booking_proposal, null);
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: first.booking_proposal.proposal_id, confirmed: true,
+  }), { code: "proposal_not_found" });
+  const state = z.object({ actions: z.array(z.unknown()) }).parse(await h.execute("get_call_state", {}));
+  assert.equal(state.actions.length, 0);
+  await h.execute("list_appointments", { patient_id: patient.patient_id });
+  const move = z.object({ proposal_id: z.string() }).parse(await h.execute("prepare_action", { request: {
+    action: "RESCHEDULE", appointment_id: appointment.appointment_id,
+    slot_id: readOnly.slots[0]?.slot_id, policy_id: patient.insurer,
+  } }));
+  h.nextTurn();
+  await h.execute("confirm_action", { proposal_id: move.proposal_id, confirmed: true });
+  assert.equal(h.writes.length, 1);
+  assert.equal(h.writes[0]?.appointment_id, appointment.appointment_id);
+  assert.ok(!Object.hasOwn(h.writes[0]!, "patient_id"));
+});
+
+test("auto-book preparation selects only the unique eligible held policy", async () => {
+  for (const scenario of [
+    { insurer: "mapfre", payable: ["mapfre", "privado"], expected: "mapfre" },
+    { insurer: "mapfre", payable: ["sanitas"], additional: "sanitas", expected: "sanitas" },
+    { insurer: "privado", payable: ["privado"], expected: "privado" },
+  ] as const) {
+    const h = harness({
+      patients: [{ ...patient, insurer: scenario.insurer }],
+      slots: [{ ...slot, payable_with: [...scenario.payable] }],
+    });
+    await identify(h);
+    const result = await searchBooking(h, "additional" in scenario ? { additional_policy: scenario.additional } : {});
+    const proposal = result.booking_proposal;
+    assert.ok(proposal?.action.action === "BOOK");
+    assert.equal(proposal.action.policy_id, scenario.expected);
+    assert.equal(h.writes.length, 0);
+    if ("additional" in scenario) {
+      const query = h.requests.find((url) => url.pathname.endsWith("/availability"));
+      assert.deepEqual(query?.searchParams.getAll("insurer"), ["mapfre", "sanitas"]);
+    }
+    h.nextTurn();
+    await h.execute("confirm_action", { proposal_id: proposal.proposal_id, confirmed: true });
+    assert.equal(h.writes[0]?.policy_id, scenario.expected);
+  }
+});
+
+test("ambiguous held policies leave the earliest slot unprepared for manual policy selection", async () => {
+  const h = harness({ slots: [
+    { ...slot, payable_with: ["mapfre", "sanitas"] },
+    { ...slot, start_time: "2026-09-19T12:00:00+02:00" },
+  ] });
+  await identify(h);
+  const result = await searchBooking(h, { additional_policy: "sanitas" });
+  assert.equal(result.booking_proposal, null);
+  assert.equal(result.slots.length, 2);
+  const state = z.object({ actions: z.array(z.unknown()) }).parse(await h.execute("get_call_state", {}));
+  assert.equal(state.actions.length, 0);
+  const manual = z.object({ proposal_id: z.string() }).parse(await h.execute("prepare_action", { request: {
+    action: "BOOK", patient_id: patient.patient_id, slot_id: result.slots[0]?.slot_id, policy_id: "sanitas",
+  } }));
+  h.nextTurn();
+  await h.execute("confirm_action", { proposal_id: manual.proposal_id, confirmed: true });
+  assert.equal(h.writes.length, 1);
+  assert.equal(h.writes[0]?.slot, slot.start_time);
+  assert.equal(h.writes[0]?.policy_id, "sanitas");
+});
+
+test("manual alternative selection replaces an auto-book draft without reusing its confirmation turn", async () => {
+  const later = { ...slot, start_time: "2026-09-19T12:00:00+02:00" };
+  const h = harness({ slots: [slot, later] });
+  await identify(h);
+  const original = await searchBooking(h);
+  assert.ok(original.booking_proposal);
+  h.nextTurn();
+  const replacement = z.object({ proposal_id: z.string() }).parse(await h.execute("prepare_action", { request: {
+    action: "BOOK", patient_id: patient.patient_id, slot_id: original.slots[1]?.slot_id, policy_id: patient.insurer,
+  } }));
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: original.booking_proposal.proposal_id, confirmed: true,
+  }), { code: "proposal_not_found" });
+  await assert.rejects(h.execute("confirm_action", { proposal_id: replacement.proposal_id, confirmed: true }),
+    { code: "confirmation_requires_new_turn" });
+  assert.equal(h.writes.length, 0);
+  h.nextTurn();
+  await h.execute("confirm_action", { proposal_id: replacement.proposal_id, confirmed: true });
+  assert.equal(h.writes[0]?.slot, later.start_time);
+});
+
+test("a corrected auto-book search replaces its draft and preserves other caller constraints", async () => {
+  const h = harness({ slots: [
+    { ...slot, start_time: "2026-09-21T09:00:00+02:00" },
+    { ...slot, start_time: "2026-09-21T15:00:00+02:00" },
+  ] });
+  await identify(h);
+  const original = await searchBooking(h, {
+    location_id: "centro", date_phrase: "this coming Monday", time_of_day: "morning",
+  });
+  assert.ok(original.booking_proposal);
+  h.nextTurn();
+  await h.execute("revise_request", { request_id: original.request_id });
+  const corrected = await searchBooking(h, { request_id: original.request_id, time_of_day: "afternoon" });
+  assert.ok(corrected.booking_proposal?.action.action === "BOOK");
+  assert.equal(corrected.booking_proposal.action.slot, "2026-09-21T15:00:00+02:00");
+  assert.equal(corrected.booking_proposal.action.location_id, "centro");
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: original.booking_proposal.proposal_id, confirmed: true,
+  }), { code: "proposal_not_found" });
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: corrected.booking_proposal.proposal_id, confirmed: true,
+  }), { code: "confirmation_requires_new_turn" });
+  h.nextTurn();
+  await h.execute("confirm_action", { proposal_id: corrected.booking_proposal.proposal_id, confirmed: true });
+  assert.equal(h.writes.length, 1);
+});
+
+test("corrected patient identity revokes the auto-book draft before preparing for the new patient", async () => {
+  const other: Patient = { ...patient, patient_id: "POTHER", given_name: "Bea", national_id: "00000000T" };
+  const h = harness({
+    directory: (query) => [query.searchParams.get("national_id") === other.national_id ? other : patient],
+  });
+  await identify(h);
+  const original = await searchBooking(h);
+  assert.ok(original.booking_proposal);
+  h.nextTurn();
+  await h.execute("find_patient", {
+    replaces_patient_id: patient.patient_id, name: "Bea Prueba Test", national_id: other.national_id,
+  });
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: original.booking_proposal.proposal_id, confirmed: true,
+  }), { code: "proposal_not_found" });
+  const corrected = await searchBooking(h, { patient_id: other.patient_id });
+  assert.ok(corrected.booking_proposal);
+  h.nextTurn();
+  await h.execute("confirm_action", { proposal_id: corrected.booking_proposal.proposal_id, confirmed: true });
+  assert.equal(h.writes.length, 1);
+  assert.equal(h.writes[0]?.patient_id, other.patient_id);
+});
+
+test("auto-book drafts for independent requests and patients survive another request's re-search", async () => {
+  const other: Patient = { ...patient, patient_id: "POTHER", given_name: "Bea", national_id: "00000000T" };
+  const h = harness({
+    directory: (query) => [query.searchParams.get("national_id") === other.national_id ? other : patient],
+  });
+  await identify(h);
+  const original = await searchBooking(h);
+  const independent = await searchBooking(h, { new_request: true });
+  await h.execute("find_patient", { name: "Bea Prueba Test", national_id: other.national_id });
+  const otherDraft = await searchBooking(h, { patient_id: other.patient_id });
+  assert.ok(original.booking_proposal && independent.booking_proposal && otherDraft.booking_proposal);
+  h.nextTurn();
+  const empty = await searchBooking(h, {
+    request_id: original.request_id, date_from: "2026-09-20", date_to: "2026-09-20",
+  });
+  assert.equal(empty.booking_proposal, null);
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: original.booking_proposal.proposal_id, confirmed: true,
+  }), { code: "proposal_not_found" });
+  await h.execute("confirm_actions", {
+    proposal_ids: [independent.booking_proposal.proposal_id, otherDraft.booking_proposal.proposal_id], confirmed: true,
+  });
+  assert.deepEqual(h.writes.map((body) => body.patient_id), [patient.patient_id, other.patient_id]);
+});
+
+test("empty blocked and unheld-private searches never auto-prepare or submit an outcome", async () => {
+  for (const availability of [
+    offered([]),
+    offered([], [{ provider_id: slot.provider_id, restriction: "specialty_not_covered" }]),
+    offered([{ ...slot, payable_with: ["privado"] }]),
+  ]) {
+    const h = harness({ availability: () => availability });
+    await identify(h);
+    const result = await searchBooking(h);
+    assert.equal(result.booking_proposal, null);
+    assert.equal(result.slots.length, 0);
+    assert.ok(result.no_booking);
+    const state = z.object({ actions: z.array(z.unknown()) }).parse(await h.execute("get_call_state", {}));
+    assert.equal(state.actions.length, 0);
+    assert.equal(h.writes.length, 0);
+  }
+});
+
+test("stale or disconnected opt-in searches cannot finish creating an automatic proposal", async () => {
+  for (const stop of ["new_turn", "disconnect"] as const) {
+    const started = Promise.withResolvers<void>();
+    const response = Promise.withResolvers<Availability>();
+    const h = harness({ availability: async () => { started.resolve(); return response.promise; } });
+    await identify(h);
+    const searching = searchBooking(h);
+    await started.promise;
+    if (stop === "new_turn") h.nextTurn();
+    else {
+      h.controller.abort();
+      await h.engine.close();
+    }
+    response.resolve(offered([slot]));
+    await assert.rejects(searching, { code: stop === "new_turn" ? "stale_turn" : "call_cancelled" });
+    assert.equal(h.writes.length, 0);
+    assert.ok(!h.records.some((record) => typeof record === "object" && record !== null && "stage" in record));
+  }
+});
+
+test("diagnostic and abandoned auto-book drafts never POST", async () => {
+  for (const diagnostic of [false, true]) {
+    const h = harness({ allowSubmissions: !diagnostic });
+    await identify(h);
+    const result = await searchBooking(h);
+    assert.ok(result.booking_proposal);
+    h.nextTurn();
+    if (diagnostic) {
+      await assert.rejects(h.execute("confirm_action", {
+        proposal_id: result.booking_proposal.proposal_id, confirmed: true,
+      }), { code: "submissions_disabled" });
+    } else h.controller.abort();
+    await h.engine.close();
+    assert.equal(h.writes.length, 0);
+  }
+});
+
+test("both next-day forms retain opt-in preparation without treating it as a date constraint", async () => {
+  for (const useReturned of [false, true]) {
+    const h = harness({
+      clinic: {
+        ...clinic,
+        locations: clinic.locations.map((location) => ({
+          ...location, hours: ["monday", "tuesday"].map((weekday) => ({ weekday, intervals: ["09:00-18:00"] })),
+        })),
+      },
+      availability: (query) => offered(query.searchParams.get("date_from") === "2026-09-22"
+        ? [{ ...slot, start_time: "2026-09-22T09:00:00+02:00" }] : []),
+    });
+    await identify(h);
+    const first = await searchBooking(h, { location_id: "centro", date_phrase: "this coming Monday" });
+    assert.deepEqual(first.no_booking?.next_day_search, {
+      patient_id: patient.patient_id, request_id: first.request_id, advance_day: true, prepare_booking: true,
+    });
+    h.nextTurn();
+    const next = bookingSearchSchema.parse(await h.execute("search_availability", useReturned
+      ? first.no_booking?.next_day_search
+      : { patient_id: patient.patient_id, request_id: first.request_id, allow_next_open_day: true, prepare_booking: true }));
+    assert.equal(next.searched_from, "2026-09-22");
+    assert.ok(next.booking_proposal?.action.action === "BOOK");
+    assert.equal(next.booking_proposal.action.slot, "2026-09-22T09:00:00+02:00");
+    assert.equal(next.booking_proposal.action.location_id, "centro");
+    await assert.rejects(h.execute("confirm_action", {
+      proposal_id: next.booking_proposal.proposal_id, confirmed: true,
+    }), { code: "confirmation_requires_new_turn" });
+    assert.equal(h.writes.length, 0);
+  }
+});
+
+test("auto-book proposals retain the existing cost-condition and deferral confirmation guards", async () => {
+  for (const transcript of ["Before I agree, what would that cost?", "I will wait until I check the price."]) {
+    const gate = new ConfirmationGate(() => 2, new AbortController().signal);
+    const h = harness({
+      beforeConfirmation: (turn) => gate.review(turn),
+      beforeOutcome: (turn, reason) => gate.reviewOutcome(turn, reason),
+    });
+    await identify(h);
+    const result = await searchBooking(h);
+    assert.ok(result.booking_proposal);
+    h.nextTurn();
+    gate.observe(2, transcript);
+    const repeated = z.object({ proposal_id: z.string(), unchanged: z.literal(true) }).parse(
+      await h.execute("prepare_action", { request: {
+        action: "BOOK", patient_id: patient.patient_id,
+        slot_id: result.booking_proposal.slot_id, policy_id: patient.insurer,
+      } }),
+    );
+    assert.equal(repeated.proposal_id, result.booking_proposal.proposal_id);
+    await assert.rejects(h.execute("confirm_action", {
+      proposal_id: result.booking_proposal.proposal_id, confirmed: true,
+    }), { code: "confirmation_needs_clarification" });
+    if (transcript.startsWith("I will wait")) {
+      await assert.rejects(h.execute("report_outcome", {
+        request_id: result.request_id, action: "NO_ACTION", reason: "caller_not_authorised",
+      }), { code: "outcome_reason_not_supported" });
+    }
+    assert.equal(h.writes.length, 0);
+  }
+});
+
+test("auto-book drafts remain subject to patient safety and terminal request outcomes", async () => {
+  for (const guard of ["emergency", "outcome"] as const) {
+    const h = harness();
+    await identify(h);
+    const result = await searchBooking(h);
+    assert.ok(result.booking_proposal);
+    h.nextTurn();
+    if (guard === "emergency") {
+      await h.execute("resolve_request", {
+        patient_id: patient.patient_id, complaint: "I might have chest pain and struggle to breathe.",
+        complaint_context: "uncertain",
+      });
+    } else {
+      await h.execute("report_outcome", {
+        request_id: result.request_id, action: "NO_ACTION", reason: "out_of_scope",
+      });
+    }
+    await assert.rejects(h.execute("confirm_action", {
+      proposal_id: result.booking_proposal.proposal_id, confirmed: true,
+    }), { code: guard === "emergency" ? "request_needs_clarification" : "proposal_not_found" });
+    assert.equal(h.writes.length, guard === "emergency" ? 0 : 1);
+    assert.ok(h.writes.every((body) => !Object.hasOwn(body, "slot")));
+  }
+});
+
+test("opt-in preparation cannot manufacture a verified patient from a registration draft", async () => {
+  const h = harness();
+  await assert.rejects(searchBooking(h), { code: "patient_unverified" });
+  await h.execute("collect_registration", {});
+  await assert.rejects(searchBooking(h), { code: "patient_unverified" });
+  const state = z.object({ actions: z.array(z.unknown()) }).parse(await h.execute("get_call_state", {}));
+  assert.equal(state.actions.length, 0);
+  assert.equal(h.writes.length, 0);
+});
+
+test("correcting held policies invalidates an auto-book draft and prevents stale-policy writes in other intents", async () => {
+  const h = harness({ availability: (query) => offered(query.searchParams.getAll("insurer").includes("sanitas")
+    ? [{ ...slot, payable_with: ["sanitas"] }] : [],
+  [{ provider_id: slot.provider_id, restriction: "specialty_not_covered" }]) });
+  await identify(h);
+  const first = await searchBooking(h, { additional_policy: "sanitas" });
+  const independent = await searchBooking(h, { new_request: true });
+  assert.ok(first.booking_proposal && independent.booking_proposal);
+  h.nextTurn();
+  const corrected = await searchBooking(h, { request_id: first.request_id, no_other_policy: true });
+  assert.equal(corrected.booking_proposal, null);
+  assert.ok(corrected.no_booking);
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: first.booking_proposal.proposal_id, confirmed: true,
+  }), { code: "proposal_not_found" });
+  const state = z.object({ actions: z.array(z.object({ proposal_id: z.string() })) }).parse(
+    await h.execute("get_call_state", {}),
+  );
+  assert.ok(state.actions.some((draft) => draft.proposal_id === independent.booking_proposal?.proposal_id));
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: independent.booking_proposal.proposal_id, confirmed: true,
+  }), { code: "policy_not_eligible" });
+  assert.equal(h.writes.length, 0);
+});
+
+test("accepted and uncertain auto-book requests cannot be replaced but retain identical retries", async () => {
+  for (const status of ["accepted", "unknown"] as const) {
+    const h = harness(status === "unknown" ? { post: async (_body, attempt) => {
+      if (attempt <= 2) throw new TypeError("uncertain delivery");
+      return new Response(null, { status: 409 });
+    } } : {});
+    await identify(h);
+    const result = await searchBooking(h);
+    const proposal = result.booking_proposal;
+    assert.ok(proposal);
+    h.nextTurn();
+    const confirming = h.execute("confirm_action", { proposal_id: proposal.proposal_id, confirmed: true });
+    if (status === "unknown") await assert.rejects(confirming, { code: "prosper_submission_unknown" });
+    else await confirming;
+    await assert.rejects(searchBooking(h, { request_id: result.request_id }), { code: "action_already_submitted" });
+    await assert.rejects(h.execute("revise_request", { request_id: result.request_id }),
+      { code: "action_already_submitted" });
+    await assert.rejects(h.execute("prepare_action", { request: {
+      action: "BOOK", patient_id: patient.patient_id, slot_id: proposal.slot_id, policy_id: patient.insurer,
+    } }), { code: "action_already_submitted" });
+    await h.execute("confirm_action", { proposal_id: proposal.proposal_id, confirmed: true });
+    assert.equal(h.writes.length, status === "unknown" ? 3 : 1);
+    for (const body of h.writes) assert.deepEqual(body, h.writes[0]);
+  }
+});
+
+test("REGISTER preparation includes concise readback guidance and corrections still require fresh consent", async () => {
+  const h = harness({ patients: [] });
+  const draft = z.object({ registration_id: z.string() }).parse(await h.execute("collect_registration", {
+    fields: registrationDetails,
+  }));
+  const input = { request: { action: "REGISTER", registration_id: draft.registration_id } };
+  const prepared = z.object({
+    proposal_id: z.string(), instruction: z.string(), readback_guidance: z.record(z.string(), z.string()),
+  }).parse(await h.execute("prepare_action", input));
+  assert.deepEqual(prepared.readback_guidance, registrationReadbackGuidance);
+  assert.match(prepared.instruction, /concise initial summary/);
+  assert.match(prepared.instruction, /repeat only changed or unclear fields/);
+  assert.match(prepared.instruction, /rest unchanged/);
+  assert.match(prepared.instruction, /fragmented correction finish/);
+  for (const value of Object.values(registrationDetails)) {
+    assert.ok(!JSON.stringify(prepared.readback_guidance).includes(value));
+  }
+  h.nextTurn();
+  await h.execute("collect_registration", {
+    registration_id: draft.registration_id, fields: { email: "corrected.fragment@example.test" },
+  });
+  const corrected = z.object({
+    proposal_id: z.string(), readback_guidance: z.record(z.string(), z.string()),
+  }).parse(await h.execute("prepare_action", input));
+  assert.notEqual(corrected.proposal_id, prepared.proposal_id);
+  assert.deepEqual(corrected.readback_guidance, registrationReadbackGuidance);
+  await assert.rejects(h.execute("confirm_action", { proposal_id: prepared.proposal_id, confirmed: true }),
+    { code: "proposal_not_found" });
+  await assert.rejects(h.execute("confirm_action", { proposal_id: corrected.proposal_id, confirmed: true }),
+    { code: "confirmation_requires_new_turn" });
+  h.nextTurn();
+  await h.execute("confirm_action", { proposal_id: corrected.proposal_id, confirmed: true });
+  assert.deepEqual(h.writes, [{
+    call_id: "real-call-from-start", ...registrationDetails, email: "corrected.fragment@example.test",
+  }]);
+});
+
+test("registration readback guidance does not leak into other prepared action returns", async () => {
+  for (const action of ["BOOK", "RESCHEDULE"] as const) {
+    const h = harness();
+    const draft = await proposeScheduling(h, action);
+    const repeated = z.record(z.string(), z.unknown()).parse(
+      await h.execute("prepare_action", { request: draft.request }),
+    );
+    assert.ok(!Object.hasOwn(repeated, "readback_guidance"));
+  }
+  const h = harness();
+  await identify(h);
+  await h.execute("list_appointments", { patient_id: patient.patient_id });
+  const cancelled = z.record(z.string(), z.unknown()).parse(await h.execute("prepare_action", {
+    request: { action: "CANCEL", appointment_id: appointment.appointment_id },
+  }));
+  assert.ok(!Object.hasOwn(cancelled, "readback_guidance"));
+});
+
+test("identical BOOK preparation reuses the unsubmitted proposal and original prepared turn", async () => {
+  const h = harness();
+  await identify(h);
+  const result = await searchBooking(h);
+  assert.ok(result.booking_proposal);
+  const input = { request: {
+    action: "BOOK", patient_id: patient.patient_id,
+    slot_id: result.booking_proposal.slot_id, policy_id: patient.insurer,
+  } };
+  for (const laterTurn of [false, true]) {
+    if (laterTurn) h.nextTurn();
+    const repeated = z.object({
+      proposal_id: z.string(), unchanged: z.literal(true), instruction: z.string(),
+    }).parse(await h.execute("prepare_action", input));
+    assert.equal(repeated.proposal_id, result.booking_proposal.proposal_id);
+    assert.match(repeated.instruction, /original preparation turn/);
+    if (!laterTurn) {
+      await assert.rejects(h.execute("confirm_action", { proposal_id: repeated.proposal_id, confirmed: true }),
+        { code: "confirmation_requires_new_turn" });
+    }
+  }
+  assert.equal(h.records.filter((event) =>
+    typeof event === "object" && event !== null && "stage" in event && event.stage === "proposed").length, 1);
+  assert.equal(h.writes.length, 0);
+  await h.execute("confirm_action", { proposal_id: result.booking_proposal.proposal_id, confirmed: true });
+  assert.equal(h.writes.length, 1);
+});
+
+test("identical REGISTER preparation in the same revision preserves its original consent boundary", async () => {
+  const h = harness({ patients: [] });
+  const draft = z.object({ registration_id: z.string() }).parse(await h.execute("collect_registration", {
+    fields: registrationDetails,
+  }));
+  const input = { request: { action: "REGISTER", registration_id: draft.registration_id } };
+  const original = z.object({ proposal_id: z.string() }).parse(await h.execute("prepare_action", input));
+  await h.execute("collect_registration", {
+    registration_id: draft.registration_id, fields: { email: registrationDetails.email },
+  });
+  const repeated = z.object({
+    proposal_id: z.string(), unchanged: z.literal(true), readback_guidance: z.record(z.string(), z.string()),
+  }).parse(await h.execute("prepare_action", input));
+  assert.equal(repeated.proposal_id, original.proposal_id);
+  assert.deepEqual(repeated.readback_guidance, registrationReadbackGuidance);
+  await assert.rejects(h.execute("confirm_action", { proposal_id: repeated.proposal_id, confirmed: true }),
+    { code: "confirmation_requires_new_turn" });
+  h.nextTurn();
+  const afterConsent = z.object({ proposal_id: z.string(), unchanged: z.literal(true) }).parse(
+    await h.execute("prepare_action", input),
+  );
+  assert.equal(afterConsent.proposal_id, original.proposal_id);
+  assert.equal(h.records.filter((event) =>
+    typeof event === "object" && event !== null && "stage" in event && event.stage === "proposed").length, 1);
+  await h.execute("confirm_action", { proposal_id: afterConsent.proposal_id, confirmed: true });
+  assert.deepEqual(h.writes, [{ call_id: "real-call-from-start", ...registrationDetails }]);
+});
+
+test("restoring an earlier registration payload after corrections cannot reuse its old revision or turn", async () => {
+  const h = harness({ patients: [] });
+  const draft = z.object({ registration_id: z.string() }).parse(await h.execute("collect_registration", {
+    fields: registrationDetails,
+  }));
+  const input = { request: { action: "REGISTER", registration_id: draft.registration_id } };
+  const original = z.object({ proposal_id: z.string(), action: z.unknown() }).parse(
+    await h.execute("prepare_action", input),
+  );
+  h.nextTurn();
+  for (const email of ["changed.fragment@example.test", registrationDetails.email]) {
+    await h.execute("collect_registration", { registration_id: draft.registration_id, fields: { email } });
+  }
+  const restored = z.object({
+    proposal_id: z.string(), action: z.unknown(), unchanged: z.boolean().optional(),
+  }).parse(await h.execute("prepare_action", input));
+  assert.deepEqual(restored.action, original.action);
+  assert.notEqual(restored.proposal_id, original.proposal_id);
+  assert.equal(restored.unchanged, undefined);
+  await assert.rejects(h.execute("confirm_action", { proposal_id: restored.proposal_id, confirmed: true }),
+    { code: "confirmation_requires_new_turn" });
+  assert.equal(h.writes.length, 0);
+});
+
+test("identical appointment payloads in different requests never reuse a prepared turn", async () => {
+  for (const action of ["BOOK", "RESCHEDULE"] as const) {
+    const h = harness();
+    const first = await proposeScheduling(h, action);
+    h.nextTurn();
+    const separate = await proposeScheduling(h, action, { new_request: true });
+    assert.notEqual(separate.request_id, first.request_id);
+    assert.notEqual(separate.proposal_id, first.proposal_id);
+    await assert.rejects(h.execute("confirm_action", { proposal_id: separate.proposal_id, confirmed: true }),
+      { code: "confirmation_requires_new_turn" });
+    assert.equal(h.writes.length, 0);
+  }
+});
+
+test("re-searching an identical BOOK request still invalidates its old proposal and needs new consent", async () => {
+  const h = harness();
+  await identify(h);
+  const first = await searchBooking(h);
+  assert.ok(first.booking_proposal);
+  h.nextTurn();
+  const second = await searchBooking(h, { request_id: first.request_id });
+  assert.ok(second.booking_proposal);
+  assert.deepEqual(second.booking_proposal.action, first.booking_proposal.action);
+  assert.notEqual(second.booking_proposal.proposal_id, first.booking_proposal.proposal_id);
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: first.booking_proposal.proposal_id, confirmed: true,
+  }), { code: "proposal_not_found" });
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: second.booking_proposal.proposal_id, confirmed: true,
+  }), { code: "confirmation_requires_new_turn" });
+  assert.equal(h.writes.length, 0);
+});
+
+test("late first preparation and failed proposals never inherit an earlier confirmation turn", async () => {
+  for (const failed of [false, true]) {
+    const h = harness({ post: async () => new Response(null, { status: 422 }) });
+    await identify(h);
+    const choices = bookingSearchSchema.parse(await h.execute("search_availability", {
+      patient_id: patient.patient_id, specialty_id: slot.specialty_id,
+    }));
+    const input = { request: {
+      action: "BOOK", patient_id: patient.patient_id, slot_id: choices.slots[0]?.slot_id, policy_id: patient.insurer,
+    } };
+    let previous: string | undefined;
+    if (failed) previous = z.object({ proposal_id: z.string() }).parse(await h.execute("prepare_action", input)).proposal_id;
+    h.nextTurn();
+    if (previous) {
+      await assert.rejects(h.execute("confirm_action", { proposal_id: previous, confirmed: true }),
+        { code: "prosper_http_422" });
+    }
+    const prepared = z.object({ proposal_id: z.string(), unchanged: z.boolean().optional() }).parse(
+      await h.execute("prepare_action", input),
+    );
+    assert.notEqual(prepared.proposal_id, previous);
+    assert.equal(prepared.unchanged, undefined);
+    await assert.rejects(h.execute("confirm_action", { proposal_id: prepared.proposal_id, confirmed: true }),
+      { code: "confirmation_requires_new_turn" });
+    assert.equal(h.writes.length, failed ? 1 : 0);
+  }
+});
+
+test("failed date resolution records only private whitelisted search context, not the caller phrase in errors", async () => {
+  const h = harness();
+  await identify(h);
+  const first = await searchBooking(h);
+  const phrase = "when the lunar calendar feels lucky";
+  const selected = {
+    request_id: first.request_id, date_phrase: phrase,
+    specialty_id: slot.specialty_id, provider_id: slot.provider_id, location_id: slot.location_id,
+    time_of_day: "morning", weekday: "monday", language: "en",
+  };
+  await assert.rejects(h.execute("search_availability", {
+    ...selected, patient_id: patient.patient_id, prepare_booking: true,
+  }), (error: unknown) => error instanceof Error && "code" in error &&
+    error.code === "unknown_date_phrase" && !error.message.includes(phrase));
+  const failure = z.object({
+    type: z.literal("tool"), name: z.literal("search_availability"), status: z.literal("error"),
+    details: z.object({ search: z.record(z.string(), z.string()) }),
+  }).parse(h.records.at(-1));
+  assert.deepEqual(failure.details.search, selected);
+  assert.equal(h.writes.length, 0);
+});
+
+test("failed search diagnostics bound whitelisted strings and omit demographics secrets and control values", async () => {
+  const h = harness();
+  const args = {
+    patient_id: "PATIENT_VALUE_NOT_FOR_DIAGNOSTICS",
+    date_phrase: "p".repeat(2_000), date_from: "f".repeat(2_000), date_to: { secret: "DATE_OBJECT_SENTINEL" },
+    request_id: "r".repeat(2_000), specialty_id: "s".repeat(2_000),
+    provider_id: "d".repeat(2_000), location_id: "l".repeat(2_000),
+    time_of_day: "t".repeat(2_000), weekday: ["WEEKDAY_ARRAY_SENTINEL"], language: "e".repeat(2_000),
+    name: "NAME_SENTINEL", national_id: "NATIONAL_ID_SENTINEL", phone: "PHONE_SENTINEL",
+    date_of_birth: "BIRTH_DATE_SENTINEL", email: "EMAIL_SENTINEL",
+    authorization: "AUTH_SENTINEL", headers: { authorization: "HEADER_SENTINEL" },
+    additional_policy: "privado", no_other_policy: true, prepare_booking: true, new_request: true,
+    nearest_origin_id: "ORIGIN_SENTINEL", relax_constraints: ["provider"], call_id: "CALL_OVERRIDE_SENTINEL",
+  };
+  await assert.rejects(h.execute("search_availability", args), { code: "invalid_tool_arguments" });
+  const failure = z.object({
+    details: z.object({
+      search: z.record(z.string(), z.string()), truncated_fields: z.array(z.string()),
+      validation_issues: z.array(z.object({ path: z.string(), code: z.string() })),
+    }),
+  }).parse(h.records.at(-1));
+  assert.deepEqual(failure.details.search, {
+    date_phrase: "p".repeat(150), date_from: "f".repeat(32), request_id: "r".repeat(128),
+    specialty_id: "s".repeat(128), provider_id: "d".repeat(128), location_id: "l".repeat(128),
+    time_of_day: "t".repeat(16), language: "e".repeat(16),
+  });
+  assert.deepEqual(failure.details.truncated_fields, Object.keys(failure.details.search));
+  assert.ok(failure.details.validation_issues.length > 0);
+  const serialized = JSON.stringify(h.records.at(-1));
+  for (const excluded of [
+    args.patient_id, args.name, args.national_id, args.phone, args.date_of_birth, args.email,
+    args.authorization, args.headers.authorization, args.nearest_origin_id, args.call_id,
+    "DATE_OBJECT_SENTINEL", "WEEKDAY_ARRAY_SENTINEL", "privado",
+  ]) assert.ok(!serialized.includes(excluded));
+  assert.ok(!Object.hasOwn(failure.details, "arguments"));
+  assert.ok(!Object.hasOwn(failure.details, "raw_arguments"));
+  assert.ok(JSON.stringify(failure.details.search).length < 1_100);
+  assert.equal(h.writes.length, 0);
+});
+
+test("malformed non-object or non-string failed-search inputs never become raw private argument dumps", async () => {
+  for (const input of [
+    "{ BROKEN_JSON_SENTINEL", JSON.stringify(["ARRAY_SENTINEL"]),
+    JSON.stringify({ date_phrase: { name: "OBJECT_SENTINEL" }, date_from: 20260922 }),
+  ]) {
+    const h = harness();
+    await assert.rejects(h.engine.execute("search_availability", input, 1), { code: "invalid_tool_arguments" });
+    const record = z.object({
+      details: z.object({ validation_issues: z.array(z.unknown()), search: z.unknown().optional() }),
+    }).parse(h.records.at(-1));
+    assert.equal(record.details.search, undefined);
+    assert.ok(!JSON.stringify(h.records).includes("SENTINEL"));
+  }
+  const h = harness();
+  await assert.rejects(h.execute("find_patient", {
+    name: "NAME_SENTINEL", date_of_birth: "INVALID_DATE_SENTINEL",
+  }), { code: "invalid_tool_arguments" });
+  const other = z.object({ details: z.object({ search: z.unknown().optional() }) }).parse(h.records.at(-1));
+  assert.equal(other.details.search, undefined);
+  assert.ok(!JSON.stringify(h.records).includes("SENTINEL"));
 });

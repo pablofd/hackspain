@@ -172,6 +172,11 @@ const absolutePattern = new RegExp(
   `(\\d{1,2}(?:st|nd|rd|th)?|${Object.keys(spokenDayNumbers).join("|")}) ` +
   `(?:(?:of|de) |d')?(${Object.keys(monthNames).join("|")})(?: (?:de |del )?(\\d{4}))?$`,
 );
+const monthFirstPattern = new RegExp(
+  `^(?:(?:on|el) )?(?:(${Object.keys(dayNames).join("|")}) )?` +
+  `(${Object.keys(monthNames).join("|")}) (?:the )?` +
+  `(\\d{1,2}(?:st|nd|rd|th)?|${Object.keys(spokenDayNumbers).join("|")})(?: (?:de |del )?(\\d{4}))?$`,
+);
 
 interface ParsedPhrase {
   date: string;
@@ -184,7 +189,7 @@ function conflict(message: string): never {
 }
 
 function parsePhrase(value: string, today: string): ParsedPhrase {
-  let phrase = normalize(value);
+  let phrase = normalize(value).replace(/\s*,\s*/g, " ").trim();
   let timeOfDay: Exclude<TimeOfDay, "any"> | undefined;
   const setTime = (time: Exclude<TimeOfDay, "any">) => {
     if (timeOfDay && timeOfDay !== time) conflict("The phrase specifies both morning and afternoon.");
@@ -215,17 +220,21 @@ function parsePhrase(value: string, today: string): ParsedPhrase {
     return { date: nextWeekday(today, weekday), weekday, ...time };
   }
   const absolute = absolutePattern.exec(phrase);
-  if (absolute?.[2] && absolute[3]) {
-    const day = spokenDayNumbers[absolute[2]] ?? Number.parseInt(absolute[2], 10);
-    const month = monthNames[absolute[3]]!;
-    const year = absolute[4] ?? today.slice(0, 4);
+  const monthFirst = absolute ? null : monthFirstPattern.exec(phrase);
+  const dayText = absolute?.[2] ?? monthFirst?.[3];
+  const monthText = absolute?.[3] ?? monthFirst?.[2];
+  if (dayText && monthText) {
+    const day = spokenDayNumbers[dayText] ?? Number.parseInt(dayText, 10);
+    const month = monthNames[monthText]!;
+    const year = absolute?.[4] ?? monthFirst?.[4] ?? today.slice(0, 4);
     const date = isoDate(`${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
-    const weekday = absolute[1] ? dayNames[absolute[1]] : undefined;
+    const weekdayText = absolute?.[1] ?? monthFirst?.[1];
+    const weekday = weekdayText ? dayNames[weekdayText] : undefined;
     if (weekday && weekdayOf(date) !== weekday) conflict("The named weekday does not match the calendar date.");
     return { date, ...time, ...(weekday ? { weekday } : {}) };
   }
   throw new AppError("unknown_date_phrase",
-    "That date phrase is not supported. Ask the caller to clarify with an exact calendar date, weekday, or supported relative date.");
+    "Unsupported date wording. Do not retry it unchanged or widen the search. If the caller already confirmed a complete exact date, use YYYY-MM-DD as both date_from and date_to and omit date_phrase; keep the same request_id and explicit weekday/time/site/provider constraints. Otherwise clarify only the unresolved component. Never discard clock-time limits, exclusions or relative qualifiers without the caller's agreement.");
 }
 
 type Interval = readonly [number, number];
@@ -284,7 +293,8 @@ function isOpen(
 }
 
 /**
- * Resolves bounded phrases, not general natural language. A spoken month/day without
+ * Resolves bounded phrases, including comma-separated day-first/month-first dates,
+ * not general natural language. A spoken month/day without
  * a year uses the call's Madrid year; it never silently rolls into the following year.
  * Explicit ranges bound a phrase; `weekday` alone filters a full search window.
  * Ranges remain unsplit: use splitDateRange (or equivalent pagination) before API calls.

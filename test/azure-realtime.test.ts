@@ -147,7 +147,7 @@ function harness(t: TestContext, options: {
     allowSubmissions: true,
     onAudio: (chunk) => { queue.push(chunk); audio.push(chunk); },
     onAudioDone: (itemId) => { queue.finish(itemId); finished.push(itemId); },
-    onInterrupt: () => queue.interrupt(),
+    onInterrupt: () => queue.interruptAll(),
     onFailure: (error) => failures.push(error),
     onTurnDone: () => { completed += 1; },
     onRecord: (event) => { records.push(event); options.onRecord?.(event); },
@@ -240,6 +240,42 @@ test("silent startup gets just one concise greeting and pauses longer than eight
   assert.equal(h.socket.events("response.create").length, 1);
   assert.equal(h.completed(), 1);
   assert.equal(h.socket.readyState, WebSocket.OPEN);
+  assert.deepEqual(h.failures, []);
+});
+
+test("ambient noise without a VAD speech event cannot permanently suppress the opening", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = harness(t, { greet: true });
+  const session = await h.connect();
+  for (let frameIndex = 0; frameIndex < 25; frameIndex += 1) {
+    session.sendAudio(frame(0xfe));
+    t.mock.timers.tick(20);
+  }
+  assert.equal(h.socket.events("response.create").length, 1);
+  h.socket.created("noise-opening");
+  h.socket.done("noise-opening");
+  session.sendAudio(frame(0xfe));
+  h.socket.receive({ type: "session.updated" });
+  t.mock.timers.tick(9000);
+  assert.equal(h.socket.events("response.create").length, 1);
+  assert.equal(h.socket.readyState, WebSocket.OPEN);
+  assert.deepEqual(h.failures, []);
+});
+
+test("actual caller speech during the bounded noisy-start grace still cancels the greeting", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const h = harness(t, { greet: true });
+  const session = await h.connect();
+  session.sendAudio(frame(0xfe));
+  t.mock.timers.tick(400);
+  assert.equal(h.socket.events("response.create").length, 0);
+  h.socket.receive({ type: "input_audio_buffer.speech_started", item_id: "caller-first" });
+  h.socket.receive({ type: "input_audio_buffer.speech_stopped" });
+  h.socket.created("caller-response");
+  h.socket.done("caller-response");
+  t.mock.timers.tick(9000);
+  assert.equal(h.socket.events("response.create").length, 0);
+  assert.equal(h.completed(), 1);
   assert.deepEqual(h.failures, []);
 });
 
@@ -522,14 +558,139 @@ test("HTTP handshake failure and session initialization timeout reject the conne
   assert.deepEqual(timeout.failures.map((error) => error.code), ["azure_session_timeout"]);
 });
 
-test("audio output overflow fails rather than allowing an unbounded playback queue", async (t) => {
+test("one audio overflow cancels bounded playback and requests a concise recovery without hanging up", async (t) => {
   const h = harness(t, { maxFrames: 1 });
   await h.connect();
   h.socket.created("too-much-audio");
+  h.socket.receive({
+    type: "response.audio_transcript.delta", response_id: "too-much-audio", item_id: "too-long",
+    delta: "An unfinished synthetic offer",
+  });
   h.socket.audio("too-much-audio", "too-long");
   await settle();
-  assert.deepEqual(h.failures.map((error) => error.code), ["audio_output_backpressure"]);
+  assert.deepEqual(h.failures, []);
   assert.equal(h.queue.next(), undefined);
+  assert.equal(h.socket.events("response.cancel").length, 1);
+  assert.deepEqual(h.socket.events("conversation.item.truncate"), [{
+    type: "conversation.item.truncate", item_id: "too-long", content_index: 0, audio_end_ms: 0,
+  }]);
+  assert.ok(h.records.some((event) => event.type === "transcript" && event.partial === true &&
+    event.text === "An unfinished synthetic offer"));
+  assert.ok(h.records.some((event) => event.type === "interruption" && event.reason === "output_limit"));
+  h.socket.done("too-much-audio", "cancelled");
+  const recovery = z.object({ response: z.object({ instructions: z.string() }) })
+    .parse(h.socket.events("response.create")[0]);
+  assert.match(recovery.response.instructions, /at most 40 spoken words/);
+  assert.match(recovery.response.instructions, /Never resubmit a different payload, infer consent, or skip validation/);
+  h.socket.created("brief-recovery");
+  h.socket.audio("brief-recovery", "brief-audio", Buffer.alloc(160, 0x82));
+  h.socket.done("brief-recovery");
+  assert.deepEqual(h.queue.next(), Buffer.alloc(160, 0x82));
+  assert.equal(h.completed(), 1);
+  assert.equal(h.socket.readyState, WebSocket.OPEN);
+  assert.equal(h.requests.length, 0);
+  assert.deepEqual(h.failures, []);
+});
+
+test("a repeated overflow in the same caller turn still fails explicitly instead of looping or growing the queue", async (t) => {
+  const h = harness(t, { maxFrames: 1 });
+  await h.connect();
+  h.socket.created("overflow");
+  h.socket.audio("overflow", "first-unheard");
+  h.socket.done("overflow", "cancelled");
+  h.socket.created("recovery-overflow");
+  h.socket.audio("recovery-overflow", "second-unheard");
+  await settle();
+  assert.deepEqual(h.failures.map((error) => error.code), ["audio_output_backpressure"]);
+  assert.equal(h.socket.events("response.create").length, 1);
+  assert.equal(h.queue.next(), undefined);
+});
+
+test("a new caller turn supersedes an overflow recovery before cancellation finishes", async (t) => {
+  const h = harness(t, { maxFrames: 1 });
+  await h.connect();
+  h.socket.created("overflow");
+  h.socket.audio("overflow", "unheard");
+  h.socket.receive({ type: "input_audio_buffer.speech_started", item_id: "latest-request" });
+  h.socket.done("overflow", "cancelled");
+  h.socket.receive({ type: "input_audio_buffer.speech_stopped" });
+  h.socket.created("latest");
+  h.socket.audio("latest", "latest-audio", Buffer.alloc(160, 0x82));
+  h.socket.done("latest");
+  assert.equal(h.socket.events("response.create").length, 0);
+  assert.deepEqual(h.queue.next(), Buffer.alloc(160, 0x82));
+  assert.deepEqual(h.failures, []);
+});
+
+test("recovery waits for an older lookup to settle but cannot revive its stale tool continuation", async (t) => {
+  const lookup = Promise.withResolvers<Response>();
+  const h = harness(t, { maxFrames: 1, request: async () => lookup.promise });
+  const session = await h.connect();
+  session.sendText("Find the synthetic patient.");
+  h.socket.created("lookup");
+  h.socket.tool("lookup", "find", "find_patient", {
+    name: "Luz Ejemplo Prueba", date_of_birth: "1980-05-10",
+  });
+  h.socket.done("lookup");
+  await settle();
+  h.socket.receive({ type: "input_audio_buffer.speech_started", item_id: "changed-request" });
+  h.socket.receive({ type: "input_audio_buffer.speech_stopped" });
+  h.socket.created("overflow");
+  h.socket.audio("overflow", "unheard");
+  h.socket.done("overflow", "cancelled");
+  assert.equal(h.socket.events("response.create").length, 1);
+  lookup.resolve(Response.json({ matches: [] }));
+  await settle();
+  assert.equal(h.socket.outputs()[0]?.output.error, "stale_turn");
+  assert.equal(h.socket.events("response.create").length, 2);
+  assert.deepEqual(h.failures, []);
+});
+
+test("overflow truncates both partly heard older output and the new unheard item", async (t) => {
+  const h = harness(t, { maxFrames: 3 });
+  await h.connect();
+  h.socket.created("first");
+  h.socket.audio("first", "partly-heard", Buffer.alloc(480, 0x80));
+  h.socket.receive({ type: "response.audio.done", response_id: "first", item_id: "partly-heard" });
+  h.socket.done("first");
+  h.queue.next();
+  h.socket.created("second");
+  h.socket.audio("second", "unheard", Buffer.alloc(160, 0x82));
+  h.socket.audio("second", "unheard", Buffer.alloc(160, 0x82));
+  assert.deepEqual(h.socket.events("conversation.item.truncate"), [
+    { type: "conversation.item.truncate", item_id: "partly-heard", content_index: 0, audio_end_ms: 20 },
+    { type: "conversation.item.truncate", item_id: "unheard", content_index: 0, audio_end_ms: 0 },
+  ]);
+  assert.equal(h.queue.next(), undefined);
+  assert.deepEqual(h.failures, []);
+});
+
+test("partial assistant diagnostics are bounded and a completed transcript is not duplicated as partial", async (t) => {
+  const h = harness(t);
+  await h.connect();
+  h.socket.created("partial");
+  h.socket.receive({
+    type: "response.audio_transcript.delta", response_id: "partial", item_id: "partial-item",
+    delta: "x".repeat(9000),
+  });
+  h.socket.done("partial", "cancelled");
+  const partial = h.records.find((event) => event.type === "transcript" && event.partial);
+  assert.ok(partial?.type === "transcript");
+  assert.equal(partial.text.length, 8000);
+  h.socket.created("complete");
+  h.socket.receive({
+    type: "response.audio_transcript.delta", response_id: "complete", item_id: "complete-item",
+    delta: "Synthetic answer.",
+  });
+  h.socket.receive({
+    type: "response.audio_transcript.done", response_id: "complete", item_id: "complete-item",
+    transcript: "Synthetic answer.",
+  });
+  h.socket.done("complete");
+  const complete = h.records.filter((event) => event.type === "transcript" && event.itemId === "complete-item");
+  assert.equal(complete.length, 1);
+  assert.ok(complete[0]?.type === "transcript" && complete[0].partial === undefined);
+  assert.deepEqual(h.failures, []);
 });
 
 test("close waits for confirmed POSTs already in flight and never starts queued actions or lookups", { timeout: 5000 }, async (t) => {

@@ -72,6 +72,15 @@ const labels: Record<RegistrationField, string> = {
   insurer: "insurance plan you currently hold",
 };
 
+export const registrationReadbackGuidance = {
+  scope: "Only for an unsubmitted, prepared registration. Never reconfirm or resend an accepted registration.",
+  initial: "Give one brief summary of the prepared human-readable details, then one question: May I register you with these details?",
+  correction: "Prepare again if any field changed. Reread only the corrected or explicitly unclear fields, state that the other details stay unchanged, and ask once to submit the complete registration. Do not repeat the whole summary.",
+  clarification: "Let a fragmented correction finish. If the caller has identified the name, email or insurer as the problem, clarify only its unfinished or uncertain fragment; do not restart a menu of all demographic fields.",
+  email: "Say email punctuation explicitly: underscore, hyphen, dot and at. Spell only the disputed fragment if needed. Never change a stored value merely to alter its pronunciation.",
+  consent: "Wait for fresh explicit consent after the latest readback. A correction or 'the rest is correct' alone is not permission to submit. If the caller repeats an already-correct value, retain the unchanged proposal but still obtain clear consent.",
+} as const;
+
 export function registrationGuidance(draft: RegistrationDraft, callDate: string) {
   const { patient, ...validation } = validateRegistration(draft.fields, callDate);
   const needed = new Set([...validation.missing_fields, ...validation.invalid_fields]);
@@ -92,9 +101,12 @@ export function registrationGuidance(draft: RegistrationDraft, callDate: string)
     ...validation,
     next_question: groups[0] ?? null,
     remaining_groups: groups.map(({ group, fields }) => ({ group, fields })),
-    ...(patient ? { prepare_action: { request: { action: "REGISTER", registration_id: draft.id } } } : {}),
+    ...(patient ? {
+      prepare_action: { request: { action: "REGISTER", registration_id: draft.id } },
+      readback_guidance: registrationReadbackGuidance,
+    } : {}),
     instruction: patient
-      ? "All demographics are valid. Call prepare_action with this registration_id NOW, before reading the final summary. Then ask for explicit confirmation and wait for a new caller turn. Nothing has been submitted."
+      ? "All demographics are valid. Call prepare_action with this registration_id NOW, before reading the final summary. Use readback_guidance for a concise summary or correction, then ask for explicit confirmation and wait for a new caller turn. Nothing has been submitted."
       : "Ask only the next short question group, in the caller's language. Retain supplied details; allow pauses and corrections. If the insurer name is already supplied but its ID is invalid, use get_clinic plans to resolve that name before asking again; never ask the caller for internal IDs. Do not require existing-patient verification, invent an insurer, or repair a DNI/NIE check letter. Use collect_registration again with this registration_id.",
   };
 }

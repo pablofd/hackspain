@@ -157,6 +157,141 @@ test("the published October phrase reports closure without silently shifting the
   }
 });
 
+test("comma-separated absolute dates preserve the exact date and named weekday in all supported languages", () => {
+  for (const phrase of [
+    "Wednesday, 7 October, 2026",
+    "Wednesday,7 October,2026",
+    "on Wednesday, the 7th of October, 2026",
+    "el miércoles, 7 de octubre, 2026",
+    "el miércoles, 7 de octubre de 2026",
+    "el dimecres, 7 d’octubre, 2026",
+    "dimecres, 7 d'octubre de 2026",
+  ]) {
+    assert.deepEqual(resolve({ date_phrase: phrase }, "test-weekdays"), {
+      dateFrom: "2026-10-07", dateTo: "2026-10-07", requestedDate: "2026-10-07",
+      weekday: "wednesday", timeOfDay: "any",
+    }, phrase);
+  }
+});
+
+test("month-first calendar dates support ordinary ordinals and commas without changing their meaning", () => {
+  for (const phrase of [
+    "October 7, 2026", "October 7th, 2026", "on October the 7th 2026", "October 7",
+  ]) {
+    assert.deepEqual(resolve({ date_phrase: phrase }), {
+      dateFrom: "2026-10-07", dateTo: "2026-10-07", requestedDate: "2026-10-07", timeOfDay: "any",
+    }, phrase);
+  }
+  for (const phrase of ["Wednesday, October 7th, 2026", "on Wednesday, October the 7th, 2026"]) {
+    assert.deepEqual(resolve({ date_phrase: phrase }), {
+      dateFrom: "2026-10-07", dateTo: "2026-10-07", requestedDate: "2026-10-07",
+      weekday: "wednesday", timeOfDay: "any",
+    }, phrase);
+  }
+});
+
+test("formatted dates retain morning/afternoon constraints, including first-thing prefixes", () => {
+  for (const phrase of [
+    "first thing on Wednesday, October 7th, 2026",
+    "Wednesday, October 7, 2026, in the morning",
+    "a primera hora el miércoles, 7 de octubre, 2026",
+    "dimecres, 7 d’octubre, 2026, al matí",
+  ]) {
+    const result = resolve({ date_phrase: phrase }, "test-weekdays");
+    assert.equal(result.dateFrom, "2026-10-07", phrase);
+    assert.equal(result.dateTo, "2026-10-07", phrase);
+    assert.equal(result.timeOfDay, "morning", phrase);
+    assert.equal(result.weekday, "wednesday", phrase);
+    assert.deepEqual(splitDateRange(result.dateFrom, result.dateTo, calendar.max_span_days), [
+      { dateFrom: "2026-10-07", dateTo: "2026-10-07" },
+    ]);
+  }
+  for (const phrase of [
+    "Wednesday, October 7, 2026, afternoon",
+    "el miércoles, 7 de octubre, 2026, por la tarde",
+    "dimecres, 7 d’octubre, 2026, a la tarda",
+  ]) {
+    assert.equal(resolve({ date_phrase: phrase }, "test-weekdays").timeOfDay, "afternoon", phrase);
+    assert.throws(() => resolve({ date_phrase: phrase, time_of_day: "morning" }), hasCode("conflicting_date_request"));
+  }
+});
+
+test("new date formats still enforce weekday agreement, real dates, same-day prohibition and the calendar window", () => {
+  for (const phrase of [
+    "Tuesday, October 7, 2026", "martes, 7 de octubre, 2026", "dimarts, 7 d’octubre, 2026",
+  ]) assert.throws(() => resolve({ date_phrase: phrase }), hasCode("conflicting_date_request"), phrase);
+  for (const phrase of ["February 30, 2026", "September 31st, 2026", "31 de septiembre, 2026"]) {
+    assert.throws(() => resolve({ date_phrase: phrase }), hasCode("invalid_date"), phrase);
+  }
+  assert.throws(() => resolve({ date_phrase: "Friday, September 18th, 2026" }), hasCode("same_day_booking_not_allowed"));
+  assert.throws(() => resolve({ date_phrase: "October 17th, 2026" }), hasCode("invalid_date_window"));
+  assert.throws(() => resolve({
+    date_phrase: "Wednesday, October 7, 2026", date_from: "2026-10-08", date_to: "2026-10-09",
+  }), hasCode("conflicting_date_request"));
+});
+
+test("punctuated weekday phrases retain the Madrid call-date anchor and strict-next-weekday rule", () => {
+  const afterMadridMidnight = new Date("2026-09-29T22:30:00Z");
+  for (const phrase of ["this coming Wednesday,", "el próximo miércoles,", "el proper dimecres,"]) {
+    const result = resolveDateRequest({ date_phrase: phrase }, afterMadridMidnight, calendar, locations);
+    assert.equal(result.dateFrom, "2026-10-07", phrase);
+    assert.equal(result.dateTo, "2026-10-07", phrase);
+  }
+  assert.throws(() => resolveDateRequest(
+    { date_phrase: "Wednesday, September 30, 2026" }, afterMadridMidnight, calendar, locations,
+  ), hasCode("same_day_booking_not_allowed"));
+});
+
+test("formatted closed-day requests preserve the requested site/time and require permission before moving", () => {
+  const input = { date_phrase: "Friday, October 9th, 2026, afternoon" };
+  const original = resolve(input, "test-short-friday");
+  assert.equal(original.dateFrom, "2026-10-09");
+  assert.equal(original.timeOfDay, "afternoon");
+  assert.deepEqual(original.closed, {
+    reason: "location_hours", requestedDate: "2026-10-09", nextOpenDate: "2026-10-13",
+  });
+  const changed = resolve({ ...input, allow_next_open_day: true }, "test-short-friday");
+  assert.equal(changed.dateFrom, "2026-10-13");
+  assert.equal(changed.timeOfDay, "afternoon");
+  assert.equal(changed.adjustedFrom, "2026-10-09");
+  assert.equal(changed.weekday, undefined);
+  assert.equal(resolve(input, "test-weekdays").closed, undefined);
+  assert.deepEqual(resolve({
+    date_phrase: "Monday, October 12th, 2026, morning",
+  }, "test-weekdays").closed, {
+    reason: "clinic_closed", requestedDate: "2026-10-12", nextOpenDate: "2026-10-13",
+  });
+});
+
+test("unsupported qualifiers are never dropped and error recovery does not repeat or broaden the search", () => {
+  for (const phrase of [
+    "Wednesday, October 7, 2026, after 16:30",
+    "Wednesday, October 7, 2026, but not in the morning",
+    "Wednesday, October 7, 2026, or Thursday",
+    "this coming Wednesday, October 14, 2026",
+    "el miércoles, 7 de octubre, 2026, después de las cinco",
+    "dimecres, 7 d’octubre, 2026, abans de les onze",
+    "October 7, 8, 2026",
+  ]) {
+    assert.throws(() => resolve({ date_phrase: phrase }), (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.code, "unknown_date_phrase");
+      assert.match(error.message, /Do not retry it unchanged or widen/);
+      assert.match(error.message, /already confirmed a complete exact date/);
+      assert.match(error.message, /both date_from and date_to and omit date_phrase/);
+      assert.match(error.message, /keep the same request_id and explicit weekday\/time\/site\/provider constraints/);
+      assert.match(error.message, /Never discard clock-time limits, exclusions or relative qualifiers/);
+      return true;
+    }, phrase);
+  }
+  assert.deepEqual(resolve({
+    date_from: "2026-10-07", date_to: "2026-10-07", weekday: "wednesday", time_of_day: "afternoon",
+  }, "test-weekdays"), {
+    dateFrom: "2026-10-07", dateTo: "2026-10-07", requestedDate: "2026-10-07",
+    weekday: "wednesday", timeOfDay: "afternoon",
+  });
+});
+
 test("explicit permission moves a closed exact day, retains time/site, and removes the stale weekday", () => {
   assert.deepEqual(resolve({
     date_phrase: "first thing on Monday the twelfth of October",

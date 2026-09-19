@@ -14,7 +14,7 @@ import { addDays, ageInMonths, madridDate, resolveDateRequest, type DateRequest 
 import { AddressResolver, rankLocations, type Point } from "./geography.js";
 import { assessComplaint, resolveProvider, resolveSpecialty, triageSymptomKeys } from "./clinic-routing.js";
 import {
-  registrationFieldNames, registrationGuidance, registrationPatchSchema, validateRegistration,
+  registrationFieldNames, registrationGuidance, registrationPatchSchema, registrationReadbackGuidance, validateRegistration,
   type RegistrationDraft, type RegistrationPatch, type ValidationIssue,
 } from "./registration.js";
 
@@ -22,6 +22,7 @@ export { addDays, madridDate } from "./scheduling.js";
 
 const availabilityInput = z.strictObject({
   patient_id: idSchema,
+  prepare_booking: z.literal(true).optional().describe("Only for this BOOK search: prepare the earliest eligible option if it has one eligible held policy, without submitting. Omit for rescheduling or read-only searches. Read back the proposal and obtain consent in a new caller turn."),
   request_id: idSchema.optional().describe("Reuse the request_id when correcting or relaxing the same request. Separate patient/intents have separate request_ids."),
   new_request: z.literal(true).optional().describe("Only for a separate additional appointment intent, not a correction or retry of an existing request."),
   specialty_id: idSchema.optional(),
@@ -100,9 +101,9 @@ const descriptions: Record<keyof typeof toolSchemas, string> = {
   collect_registration: "Start an explicitly requested new-patient registration immediately, even before collecting details. Save caller-provided demographics incrementally; returns only missing/invalid fields and the next short question group. No existing-patient verification is required. Corrections invalidate this registration's unsubmitted proposal. When ready, call prepare_action with registration_id BEFORE the final readback; a later explicit confirmation is still required.",
   resolve_request: "Resolve the caller's explicitly chosen provider/specialty; use routine symptom routing only when no specialty/provider was requested. Ask about ambiguous doctors; do not guess. Emergency red flags still override scheduling: a medical_emergency result requires immediate report_outcome ESCALATE, no booking. Patient age is calculated from their verified chart.",
   locate_origin: "Resolve only the caller's public street/place and town for nearest-site scheduling. If several candidates remain, ask the caller to select one, then repeat with candidate_id. Returns an origin_id for search_availability.",
-  search_availability: "Find real slots for a verified patient. Omit dates for earliest from tomorrow; use date_phrase for spoken relative dates. Specify only caller constraints. Keep request_id when changing the same request. A nearest_origin_id selects the closest site with actual eligible availability. Returns bookable slot_id, type, plan and actionable alternatives.",
+  search_availability: "Find real slots for a verified patient. For BOOK set prepare_booking:true to prepare the first eligible option when its held policy is unambiguous; booking_proposal is NOT submitted. Omit the flag for rescheduling or read-only searches. Omit dates for earliest from tomorrow; use date_phrase for spoken relative dates. Specify only caller constraints and keep request_id for corrections. nearest_origin_id selects the closest eligible site.",
   list_appointments: "Read a verified patient's appointments. Only upcoming appointments can be changed. Use this before cancelling or moving an appointment.",
-  prepare_action: "Prepare (but DO NOT SEND) an action. request.action is BOOK, CANCEL, RESCHEDULE or REGISTER. Use returned slot_id for booking/moving. For REGISTER prefer the ready registration_id from collect_registration; complete new_patient remains supported. Read the returned details to the caller and ask for confirmation. Replaces an unconfirmed proposal for the same intent.",
+  prepare_action: "Prepare (but DO NOT SEND) an action. request.action is BOOK, CANCEL, RESCHEDULE or REGISTER. Use returned slot_id for booking/moving. For REGISTER prefer the ready registration_id from collect_registration and follow readback_guidance; complete new_patient remains supported. Read the returned details and obtain explicit confirmation. An identical unconfirmed proposal in the same intent is reused; changed details require a new proposal and consent.",
   confirm_action: "Send a prepared action ONLY after the caller explicitly confirms its details in a NEW conversational turn. Never call in the same turn as prepare_action. Cannot undo a submission; do not say confirmed until status is accepted or duplicate.",
   confirm_actions: "Confirm multiple prepared actions after reading ALL their details and receiving explicit agreement in a new caller turn. Each action sends one POST; all proposals are checked before any POST. Use get_call_state after an uncertain/partial failure.",
   revise_request: "Invalidate a request's unconfirmed proposals and slots immediately when the caller corrects or changes their mind. Then search again with this request_id. Already submitted records cannot be undone.",
@@ -146,7 +147,7 @@ interface SchedulingRequest {
   id: string;
   patientId: string;
   specialtyId: string;
-  input: z.infer<typeof availabilityInput>;
+  input: Omit<z.infer<typeof availabilityInput>, "prepare_booking">;
   reasons: Set<OutcomeReason>;
   needsOtherPolicyAnswer: boolean;
   lastSearch?: {
@@ -302,6 +303,8 @@ export class Receptionist {
             if (proposals.some((proposal) => !proposal.result && !proposal.pending && proposal.status !== "unknown")) {
               await this.call.beforeConfirmation?.(turn);
             }
+            this.current(turn);
+            for (const proposal of proposals) this.validateSubmission(proposal);
             for (const proposal of proposals) accepted.push(await this.submit(proposal, turn));
             result = { actions: accepted, instruction: "Confirm only these accepted actions. Do not send them again." };
             break;
@@ -351,6 +354,9 @@ export class Receptionist {
             const { request, key, action, existing } = state;
             if (input.no_other_policy && request) this.singlePlanPatients.add(request.patientId);
             if (input.action === "ESCALATE") this.emergency = true;
+            if (input.action === "NO_ACTION" && request && !state.alreadySent) {
+              this.discardSchedulingDrafts(request.id);
+            }
             const proposal = existing ?? this.makeProposal(key, action, turn, request?.patientId, request?.id);
             result = await this.submit(proposal, turn);
             break;
@@ -364,9 +370,13 @@ export class Receptionist {
           try { this.invalidateRejectedRegistration(name, args); }
           catch (immutable) { failure = immutable; }
         }
+        const details = {
+          ...(failure instanceof InputValidationError ? { validation_issues: failure.issues } : {}),
+          ...(name === "search_availability" ? this.searchDiagnostics(args) : {}),
+        };
         this.call.record({
           type: "tool", name, status: "error", code: failure instanceof AppError ? failure.code : "internal_error",
-          ...(failure instanceof InputValidationError ? { details: { validation_issues: failure.issues } } : {}),
+          ...(Object.keys(details).length ? { details } : {}),
         });
         throw failure;
       }
@@ -390,6 +400,27 @@ export class Receptionist {
         `Correct these tool argument fields using the schema: ${fields.join(", ")}. Do not ask the caller to fix internal IDs or action names. For registration, retain supplied details and use collect_registration for missing or unclear demographics; never guess an insurer or repair a DNI/NIE check letter.`);
     }
     return result.data;
+  }
+
+  private searchDiagnostics(input: unknown) {
+    // Caller date text belongs only in protected call records, not errors or telemetry.
+    if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+    const fields: Record<string, string> = {};
+    const truncated: string[] = [];
+    for (const [key, limit] of [
+      ["date_phrase", 150], ["date_from", 32], ["date_to", 32], ["request_id", 128],
+      ["specialty_id", 128], ["provider_id", 128], ["location_id", 128],
+      ["time_of_day", 16], ["weekday", 16], ["language", 16],
+    ] as const) {
+      if (!Object.hasOwn(input, key)) continue;
+      const value = (input as Record<string, unknown>)[key];
+      if (typeof value !== "string") continue;
+      fields[key] = value.slice(0, limit);
+      if (value.length > limit) truncated.push(key);
+    }
+    return Object.keys(fields).length
+      ? { search: fields, ...(truncated.length ? { truncated_fields: truncated } : {}) }
+      : {};
   }
 
   private outcomeState(input: z.infer<typeof toolSchemas.report_outcome>) {
@@ -438,6 +469,16 @@ export class Receptionist {
   private patient(id: string): Patient {
     const patient = this.patients.get(id);
     if (!patient) throw new AppError("patient_unverified", "Use find_patient with the patient's full name and another matching identifier first.");
+    return patient;
+  }
+
+  private schedulingPatient(id: string): Patient {
+    const patient = this.patient(id);
+    const safetyQuestion = this.blockedBookingPatients.get(id);
+    if (safetyQuestion) {
+      throw new AppError("request_needs_clarification",
+        `Clarify possible emergency symptoms using resolve_request for this patient, not address/site/date preferences. ${safetyQuestion}`);
+    }
     return patient;
   }
 
@@ -568,6 +609,17 @@ export class Receptionist {
     request.reasons.clear();
     request.needsOtherPolicyAnswer = false;
     delete request.lastSearch;
+  }
+
+  private discardSchedulingDrafts(requestId: string): void {
+    for (const [id, proposal] of this.proposals) {
+      if (proposal.requestId === requestId &&
+          (proposal.action.action === "BOOK" || proposal.action.action === "RESCHEDULE") &&
+          (proposal.status === "proposed" || proposal.status === "failed")) {
+        this.proposals.delete(id);
+      }
+    }
+    for (const [id, option] of this.options) if (option.requestId === requestId) this.options.delete(id);
   }
 
   private invalidatePatient(patientId: string): void {
@@ -731,17 +783,14 @@ export class Receptionist {
     throw new AppError("request_needs_clarification");
   }
 
-  private async search(input: z.infer<typeof availabilityInput>, turn: number): Promise<unknown> {
+  private async search(
+    { prepare_booking: prepareBooking, ...input }: z.infer<typeof availabilityInput>, turn: number,
+  ): Promise<unknown> {
     this.observedReasons.clear();
     this.needsOtherPolicyAnswer = false;
     this.latestRequestId = undefined;
     if (this.emergency) throw new AppError("emergency_no_booking", "Report the emergency and arrange no appointment.");
-    const patient = this.patient(input.patient_id);
-    const safetyQuestion = this.blockedBookingPatients.get(patient.patient_id);
-    if (safetyQuestion) {
-      throw new AppError("request_needs_clarification",
-        `Clarify possible emergency symptoms using resolve_request for this patient, not address/site/date preferences. ${safetyQuestion}`);
-    }
+    const patient = this.schedulingPatient(input.patient_id);
     const clinic = await this.api.getClinic(this.call.parent, this.call.signal);
     this.current(turn);
     const explicit = input.request_id ? this.requests.get(input.request_id) : undefined;
@@ -887,9 +936,19 @@ export class Receptionist {
         age >= specialty.min_age_months && (specialty.max_age_months === null || age <= specialty.max_age_months))
         .map(({ id, name }) => ({ id, name }))
       : [];
+    const firstSlot = slots[0];
+    const payablePlans = [...new Set(firstSlot?.payable_with.filter((plan) => plans.has(plan)) ?? [])];
+    const policy = payablePlans.length === 1 ? payablePlans[0] : undefined;
+    const bookingProposal = prepareBooking && firstSlot && policy ? {
+      ...await this.prepare({
+        action: "BOOK", patient_id: patient.patient_id, slot_id: firstSlot.slot_id, policy_id: policy,
+      }, turn),
+      slot_id: firstSlot.slot_id, submitted: false,
+    } : null;
     return {
       request_id: request.id, patient_id: patient.patient_id,
       slots, blocked: scan.blocked, searched_from: dates.dateFrom, searched_to: scan.endSearched,
+      booking_proposal: bookingProposal, submitted: false, pricing_status: "not_supplied",
       ...(dates.adjustedFrom ? { adjusted_from_closed_date: dates.adjustedFrom } : {}),
       ...(merged.nearest_origin_id ? { evaluated_sites: evaluatedSites } : {}),
       no_booking: slots.length ? null : {
@@ -901,11 +960,16 @@ export class Receptionist {
         ...(ageRedirect.length ? { age_appropriate_specialty_alternatives: ageRedirect } : {}),
         ...(dates.dateTo < clinic.calendar.ends ? { next_window_starts: addDays(dates.dateTo, 1) } : {}),
         ...(dates.dateFrom === dates.dateTo && dates.dateTo < clinic.calendar.ends ? {
-          next_day_search: { patient_id: patient.patient_id, request_id: request.id, advance_day: true },
+          next_day_search: {
+            patient_id: patient.patient_id, request_id: request.id, advance_day: true,
+            ...(prepareBooking ? { prepare_booking: true } : {}),
+          },
         } : {}),
       },
       instruction: slots.length
-        ? "Prepare the earliest acceptable slot before reading its exact details. Wait for the caller's confirmation, then confirm_action. Do not repeat identification or invent extra constraints."
+        ? bookingProposal
+          ? "booking_proposal is already prepared, NOT submitted, for its paired slot_id and policy. If these match the final request, read its exact details and wait for a NEW caller turn explicitly agreeing, then confirm_action with its proposal_id. Do not prepare that same offer again. For another slot or policy, use prepare_action before its readback; corrections require revise_request and a new search. Do not treat questions or unrelated agreement as consent."
+          : "No BOOK proposal was prepared. Use prepare_action for the caller's intended action and chosen slot/eligible held policy BEFORE reading the final offer. Multiple eligible held policies require an explicit policy selection in prepare_action. Wait for a new caller turn explicitly confirming those details, then confirm_action. Do not repeat identification or invent extra constraints."
         : [
           "No outcome has been submitted. Preserve the caller's specialty, site and time constraints.",
           "Honor an explicitly requested alternative provider/site/time before refusing: revise_request, then search with the same request_id and explicitly relax only caller-approved constraints.",
@@ -1046,7 +1110,7 @@ export class Receptionist {
     };
   }
 
-  private async prepare(input: z.infer<typeof prepareInput>, turn: number): Promise<unknown> {
+  private async prepare(input: z.infer<typeof prepareInput>, turn: number) {
     if (this.emergency) throw new AppError("emergency_no_booking", "Report ESCALATE medical_emergency; do not prepare appointments.");
     let action: ProsperAction;
     let key: string;
@@ -1106,7 +1170,7 @@ export class Receptionist {
     } else {
       const option = this.options.get(input.slot_id);
       if (!option) throw new AppError("slot_not_verified", "Search availability again; use a slot_id from the current results.");
-      this.patient(option.patientId);
+      this.schedulingPatient(option.patientId);
       if (!option.plans.has(input.policy_id) || !option.slot.payable_with.includes(input.policy_id)) {
         throw new AppError("policy_not_eligible", "Use a plan the patient holds and the offered slot accepts.");
       }
@@ -1139,6 +1203,12 @@ export class Receptionist {
     if ([...this.proposals.values()].some((p) => p.key === "outcome" || (requestId && p.key === `outcome:${requestId}`))) {
       throw new AppError("outcome_already_submitted");
     }
+    const clinic = await this.api.getClinic(this.call.parent, this.call.signal);
+    this.current(turn);
+    if (registration && registration.revision !== registrationRevision) {
+      throw new AppError("registration_changed", "The registration changed during preparation. Prepare its latest complete draft before requesting confirmation.");
+    }
+    let unchanged: Proposal | undefined;
     for (const [id, previous] of this.proposals) {
       if (previous.key !== key) continue;
       if (registration && previous.registrationId && previous.registrationId !== registration.id) {
@@ -1148,18 +1218,24 @@ export class Receptionist {
       if (previous.status !== "proposed" && previous.status !== "failed") {
         throw new AppError("action_already_submitted", "The previous action may already be recorded. Do not replace it or claim it was undone; retry the same proposal only if its result is unknown.");
       }
-      this.proposals.delete(id);
+      if (previous.status === "proposed" && !previous.pending && !previous.result &&
+          previous.patientId === patientId && previous.requestId === requestId &&
+          previous.registrationId === registration?.id && previous.registrationRevision === registrationRevision &&
+          JSON.stringify(previous.action) === JSON.stringify(action)) {
+        unchanged = previous;
+      } else this.proposals.delete(id);
     }
-    const clinic = await this.api.getClinic(this.call.parent, this.call.signal);
-    this.current(turn);
-    if (registration && registration.revision !== registrationRevision) {
-      throw new AppError("registration_changed", "The registration changed during preparation. Prepare its latest complete draft before requesting confirmation.");
-    }
-    const proposal = this.makeProposal(key, action, turn, patientId, requestId, registration);
+    const proposal = unchanged ?? this.makeProposal(key, action, turn, patientId, requestId, registration);
     return {
       proposal_id: proposal.id, request_id: requestId, registration_id: registration?.id, action: this.publicAction(action),
       ...this.describe(action, clinic, patientId),
-      instruction: "Read the details to the caller, ask for confirmation, and wait. Only use confirm_action after a NEW caller turn explicitly agrees. Nothing is submitted yet.",
+      ...(action.action === "REGISTER" ? { readback_guidance: registrationReadbackGuidance } : {}),
+      ...(unchanged ? { unchanged: true } : {}),
+      instruction: unchanged
+        ? "This identical unsubmitted proposal keeps its original preparation turn. Do not repeat a completed readback or request consent again if a later caller turn already explicitly approved these exact details; confirm the same proposal_id. Otherwise read the final details and wait for a new explicit agreement. Nothing is submitted yet."
+        : action.action === "REGISTER"
+          ? "Use readback_guidance for one concise initial summary. After a correction, repeat only changed or unclear fields and acknowledge the rest unchanged. Let a fragmented correction finish without restarting a field menu. Wait for a NEW caller turn explicitly approving the complete latest registration; a correction or 'the rest is correct' alone is not consent. Nothing is submitted yet."
+          : "Read the details to the caller, ask for confirmation, and wait. Only use confirm_action after a NEW caller turn explicitly agrees. Nothing is submitted yet.",
     };
   }
 
@@ -1192,21 +1268,37 @@ export class Receptionist {
     return proposal;
   }
 
-  private async submit(proposal: Proposal, turn: number): Promise<SubmissionResult> {
-    this.current(turn);
+  private validateSubmission(proposal: Proposal): void {
+    if (!this.call.allowSubmissions) throw new AppError("submissions_disabled", "This diagnostic session cannot send records to Prosper.");
+    if (proposal.result || proposal.pending || proposal.status === "unknown") return;
     if (proposal.registrationId &&
         (this.proposals.get(proposal.id) !== proposal ||
           this.registrations.get(proposal.registrationId)?.revision !== proposal.registrationRevision)) {
       throw new AppError("registration_changed", "The registration was corrected. Prepare the latest draft and obtain a new explicit confirmation; never submit the stale proposal.");
     }
+    if (this.proposals.get(proposal.id) !== proposal) {
+      throw new AppError("proposal_not_found", "The draft was invalidated. Prepare the current request and obtain fresh confirmation.");
+    }
     if (this.emergency && proposal.action.action !== "ESCALATE") throw new AppError("emergency_no_booking");
-    if (!this.call.allowSubmissions) throw new AppError("submissions_disabled", "This diagnostic session cannot send records to Prosper.");
-    if (proposal.result) return proposal.result;
-    if (proposal.pending) return proposal.pending;
+    if (proposal.action.action === "BOOK" || proposal.action.action === "RESCHEDULE") {
+      if (proposal.patientId) this.schedulingPatient(proposal.patientId);
+      if ([...this.proposals.values()].some((outcome) => outcome.action.action === "NO_ACTION" &&
+          (outcome.key === "outcome" || (proposal.requestId && outcome.requestId === proposal.requestId)) &&
+          outcome.status !== "proposed" && outcome.status !== "failed")) {
+        throw new AppError("outcome_already_submitted", "This request already has a final or uncertain refusal. Do not submit its old appointment draft.");
+      }
+    }
     if (proposal.patientId && "policy_id" in proposal.action &&
         !this.heldPlans.get(proposal.patientId)?.has(proposal.action.policy_id)) {
       throw new AppError("policy_not_eligible", "The patient corrected their held plans. Search again before preparing or confirming this appointment.");
     }
+  }
+
+  private async submit(proposal: Proposal, turn: number): Promise<SubmissionResult> {
+    this.current(turn);
+    this.validateSubmission(proposal);
+    if (proposal.result) return proposal.result;
+    if (proposal.pending) return proposal.pending;
     this.call.record({ type: "action", stage: "confirmed", proposalId: proposal.id, action: proposal.action });
     proposal.status = "submitting";
     const operation = (async (): Promise<SubmissionResult> => {
@@ -1263,10 +1355,10 @@ export function receptionistInstructions(startedAt: Date, allowSubmissions: bool
     "search_availability returns a request_id per patient/intent. Reuse it for corrections or another insurance plan. Preserve all existing constraints unless the caller agrees to relax them, then list those in relax_constraints. Use new_request:true ONLY for a distinct additional appointment, never to work around a submitted action.",
     "Use exact returned slot_id and payable_with. Appointment type is chosen by the API from history/specialty, not by you. Use the plan on file unless the caller explicitly states a second plan.",
     "Privado is a held plan, NOT a fallback. Never offer or recommend private payment to bypass coverage. Do not suggest an excluded service can be authorized or covered elsewhere without clinic evidence.",
-    "Coverage does not guarantee a free visit. State only the coverage verified by the clinic; exact copay amounts are not published in the clinic API/catalogue, so say that the exact copay is not published. Never promise zero cost or invent a fee. A caller deferring over an unknown price is not caller_not_authorised.",
-    "To book, move, cancel or register: prepare_action, read back the returned human-readable details, ask whether that is correct, and WAIT for a new caller turn explicitly agreeing. Only then confirm_action. A change of mind means a new search/proposal and a new confirmation, NOT confirmation of the stale proposal.",
-    "Call prepare_action BEFORE reading the final offer; that way the caller's next agreement can immediately confirm it without another confirmation loop. If the caller corrects any constraint, call revise_request immediately and search again. On digressions, retain the requested appointment but do not interpret unrelated agreement as consent.",
-    "Do not call prepare_action and confirm_action in the same turn. Do not say booked, cancelled, moved or registered until confirm_action returns accepted or duplicate. Those mean received by the clinic API, not that a judging score is known.",
+    "Coverage does not guarantee a free visit. State only the coverage verified by the clinic; pricing_status:not_supplied means exact copay amounts are not published and the API/catalogue supplies no monetary quote. Offer the verified covered appointment normally; do not proactively suggest deferring it to check prices. If asked, explain that the exact price is not supplied. Never promise zero cost or invent a fee. Honor any explicit cost condition before confirmation. A caller deferring over an unknown price is not caller_not_authorised.",
+    "To book, move, cancel or register: obtain a prepared proposal, read back its returned human-readable details, ask whether that is correct, and WAIT for a new caller turn explicitly agreeing. Only then confirm_action. A change of mind means a new search/proposal and a new confirmation, NOT confirmation of the stale proposal.",
+    "For a BOOK search, set prepare_booking:true on that invocation. Its booking_proposal, when returned, is already prepared for the paired slot and policy: read it back, then confirm its proposal_id after new explicit consent without calling prepare_action again. Omit the flag for rescheduling or read-only searches. If no booking_proposal is returned, or another slot/policy/action is chosen, call prepare_action BEFORE reading the final offer. If the caller corrects a constraint, use revise_request and a fresh search/proposal; never confirm the stale offer. On digressions, do not interpret unrelated agreement as consent.",
+    "Do not call prepare_action and confirm_action in the same turn; a proposal returned by search_availability also requires a NEW caller turn explicitly agreeing after its readback. Do not say booked, cancelled, moved or registered until confirm_action returns accepted or duplicate. Those mean received by the clinic API, not that a judging score is known.",
     "Listen to the WHOLE confirmation. 'Yes, but...', corrections and requests to check another time are not final consent. Clarify or revise first; never submit while an alternative request remains unresolved. A confirmation error means no new action was sent.",
     "Submitted actions accumulate and cannot be replaced. Submit exactly the COMPLETE requested list, once per action. For multiple actions, prepare each, read all their details, and use confirm_actions after one explicit agreement to all of them. Each action still has its own POST. Never end after doing only one of two intents.",
     "Use get_call_state to recover verified identities, pending proposals and accepted actions instead of asking the same questions or resubmitting. Do not submit extra NO_ACTION as a farewell after a successful request. A separately unbookable intent must use its own request_id.",

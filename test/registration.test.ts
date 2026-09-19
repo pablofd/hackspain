@@ -7,7 +7,7 @@ import { AppError } from "../src/errors.js";
 import { ProsperClient, type Clinic } from "../src/prosper.js";
 import { actionSchema, type Availability, type Patient, type ProsperAction, type Slot } from "../src/prosper-types.js";
 import { Receptionist, receptionistInstructions, receptionistTools } from "../src/receptionist.js";
-import { registrationFieldNames } from "../src/registration.js";
+import { registrationFieldNames, registrationGuidance, registrationReadbackGuidance } from "../src/registration.js";
 
 const demographics = {
   given_name: "Nueva", first_surname: "Prueba", second_surname: "Ejemplo",
@@ -580,5 +580,62 @@ test("valid single-plan refusals need outcome review but no additional approval 
   assert.equal(reviews, 0);
   await h.execute("report_outcome", { ...input, no_other_policy: true });
   assert.equal(reviews, 1);
+  assert.equal(h.writes.length, 1);
+});
+
+test("ready registrations supply concise readback and correction guidance without patient values", () => {
+  const result = registrationGuidance({
+    id: "registration-synthetic", revision: 3, fields: demographics,
+  }, "2026-09-18");
+  assert.equal(result.ready, true);
+  assert.equal(result.next_question, null);
+  assert.deepEqual(result.readback_guidance, registrationReadbackGuidance);
+  assert.match(registrationReadbackGuidance.scope, /unsubmitted, prepared/);
+  assert.match(registrationReadbackGuidance.correction, /Prepare again if any field changed/);
+  assert.match(registrationReadbackGuidance.correction, /other details stay unchanged/);
+  assert.match(registrationReadbackGuidance.clarification, /Let a fragmented correction finish/);
+  assert.match(registrationReadbackGuidance.clarification, /do not restart a menu/);
+  assert.match(registrationReadbackGuidance.email, /underscore, hyphen, dot and at/);
+  assert.match(registrationReadbackGuidance.consent, /fresh explicit consent/);
+  assert.match(registrationReadbackGuidance.consent, /alone is not permission to submit/);
+  for (const value of Object.values(demographics)) {
+    assert.equal(JSON.stringify(result.readback_guidance).includes(value), false);
+  }
+});
+
+test("a surname-only correction does not reopen complete fields or weaken registration validation", () => {
+  const corrected = { ...demographics, first_surname: "Corregida" };
+  const draft = { id: "registration-synthetic", revision: 4, fields: corrected };
+  const result = registrationGuidance(draft, "2026-09-18");
+  assert.equal(result.ready, true);
+  assert.deepEqual(result.missing_fields, []);
+  assert.deepEqual(result.invalid_fields, []);
+  assert.deepEqual(result.remaining_groups, []);
+  assert.deepEqual(draft.fields, corrected);
+  const invalid = registrationGuidance({
+    ...draft, fields: { ...corrected, national_id: "12345678A" },
+  }, "2026-09-18");
+  assert.equal(invalid.ready, false);
+  assert.deepEqual(invalid.invalid_fields, ["national_id"]);
+  assert.equal(invalid.readback_guidance, undefined);
+  assert.equal(invalid.prepare_action, undefined);
+});
+
+test("repeating an unchanged value retains the proposal and readback guidance without skipping fresh consent", async () => {
+  const h = harness();
+  const draft = await collect(h, { fields: demographics });
+  const proposal = await prepare(h, draft.registration_id);
+  const result = z.object({
+    ready: z.literal(true), proposal_id: z.string(), readback_guidance: z.object({ consent: z.string() }),
+  }).parse(await h.execute("collect_registration", {
+    registration_id: draft.registration_id, fields: { email: demographics.email },
+  }));
+  assert.equal(result.proposal_id, proposal.proposal_id);
+  assert.equal(result.readback_guidance.consent, registrationReadbackGuidance.consent);
+  assert.equal(h.records.filter((event) => event.type === "action" && event.stage === "proposed").length, 1);
+  await assert.rejects(h.execute("confirm_action", { proposal_id: proposal.proposal_id, confirmed: true }),
+    { code: "confirmation_requires_new_turn" });
+  h.nextTurn();
+  await h.execute("confirm_action", { proposal_id: proposal.proposal_id, confirmed: true });
   assert.equal(h.writes.length, 1);
 });
