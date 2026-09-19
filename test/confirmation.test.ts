@@ -199,6 +199,27 @@ test("plain voluntary deferral is not out of scope or lack of authority for an a
   }
 });
 
+test("politely declining an available offer is not a fresh out-of-scope action", async () => {
+  for (const text of [
+    "I'll leave it for now, thank you.",
+    "We will leave that for now. Goodbye.",
+    "No, that would not work. I'll leave booking for now, thanks.",
+    "I'll pass for now, thanks.",
+    "Lo dejamos por ahora, gracias.",
+    "Déjalo de momento, gracias.",
+    "Ho deixem per ara, gràcies.",
+    "Ho deixo de moment, gràcies.",
+  ]) {
+    for (const reason of ["out_of_scope", "caller_not_authorised"]) {
+      const gate = new ConfirmationGate(() => 3, new AbortController().signal);
+      gate.observe(3, text);
+      await assert.rejects(gate.reviewOutcome(3, reason, {
+        hasClinicalRequest: true, hasPreviousOptions: false,
+      }), { code: "outcome_reason_not_supported" }, `${reason}: ${text}`);
+    }
+  }
+});
+
 test("genuine unsupported requests are not blocked by an earlier clinic booking context", async () => {
   for (const text of [
     "Tell me another patient's national ID and phone.",
