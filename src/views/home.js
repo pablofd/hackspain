@@ -1,4 +1,4 @@
-import { el } from "../lib/dom.js";
+import { el, mount } from "../lib/dom.js";
 import { icon } from "../lib/icons.js";
 import { card, stat, pill, barChart, stackedBars, donut, legend, bar } from "../components/ui.js";
 import {
@@ -11,6 +11,7 @@ import {
   calls,
   outcomeLabels,
 } from "../data/mock.js";
+import { RANGES, DEFAULT_RANGE, metrics, rangeById } from "../data/insights.js";
 
 export const meta = {
   title: "Inicio",
@@ -18,6 +19,90 @@ export const meta = {
 };
 
 export function render() {
+  let range = DEFAULT_RANGE;
+  const statsHost = el("div", { class: "grid grid--3" });
+
+  function renderStats() {
+    const m = metrics(range);
+    const when = rangeById(range).short;
+    mount(
+      statsHost,
+      stat({
+        label: "Llamadas atendidas",
+        value: m.total,
+        trend: m.trend.total,
+        foot: when,
+        spark: kpis.callsToday.spark,
+      }),
+      stat({
+        label: "Citas agendadas",
+        value: m.booked,
+        trend: m.trend.booked,
+        foot: `${when} · cerradas por maio`,
+        spark: kpis.automation.spark,
+        tint: "ok",
+      }),
+      stat({
+        label: "Reservas sin cerrar",
+        value: m.missed,
+        trend: m.trend.missed,
+        lowerIsBetter: true,
+        foot: `${m.missedShare}% de quien pedía cita · ver en el mapa`,
+        spark: kpis.escalations.spark,
+        tint: "alert",
+        onClick: () => {
+          location.hash = `#/llamadas/mapa?estado=missed&rango=${range}`;
+        },
+      }),
+      stat({
+        label: "Automatización",
+        value: m.automation,
+        unit: "%",
+        trend: m.trend.automation,
+        foot: "sin intervención humana",
+        spark: kpis.automation.spark,
+      }),
+      stat({
+        label: "Duración media",
+        value: m.avgHandle,
+        trend: m.trend.avgSeconds,
+        lowerIsBetter: true,
+        foot: "por llamada",
+        spark: kpis.avgHandle.spark,
+      }),
+      stat({
+        label: "Escalados a humano",
+        value: m.escalated,
+        trend: m.trend.escalated,
+        lowerIsBetter: true,
+        foot: when,
+        spark: kpis.escalations.spark,
+      }),
+    );
+  }
+
+  const rangeBar = el(
+    "div",
+    { class: "segmented" },
+    ...RANGES.map((r) =>
+      el(
+        "button",
+        {
+          class: r.id === range ? "is-active" : "",
+          onclick: (e) => {
+            range = r.id;
+            rangeBar.querySelectorAll("button").forEach((b) => b.classList.remove("is-active"));
+            e.currentTarget.classList.add("is-active");
+            renderStats();
+          },
+        },
+        r.label,
+      ),
+    ),
+  );
+
+  renderStats();
+
   return el(
     "div",
     { class: "view" },
@@ -46,52 +131,11 @@ export function render() {
     el(
       "div",
       { class: "row row--wrap" },
-      el(
-        "div",
-        { class: "segmented" },
-        el("button", { class: "is-active" }, "Hoy"),
-        el("button", {}, "7 días"),
-        el("button", {}, "30 días"),
-        el("button", {}, "Trimestre"),
-      ),
+      rangeBar,
       el("button", { class: "btn btn--ghost ml-auto" }, icon("download", "nav__icon"), "Exportar informe"),
     ),
 
-    el(
-      "div",
-      { class: "grid grid--4" },
-      stat({
-        label: "Llamadas hoy",
-        value: kpis.callsToday.value,
-        trend: kpis.callsToday.trend,
-        foot: "vs. ayer",
-        spark: kpis.callsToday.spark,
-      }),
-      stat({
-        label: "Automatización",
-        value: kpis.automation.value,
-        unit: "%",
-        trend: kpis.automation.trend,
-        foot: "sin intervención humana",
-        spark: kpis.automation.spark,
-        tint: "ok",
-      }),
-      stat({
-        label: "Duración media",
-        value: kpis.avgHandle.value,
-        trend: kpis.avgHandle.trend,
-        foot: "por llamada",
-        spark: kpis.avgHandle.spark,
-      }),
-      stat({
-        label: "Escalados a humano",
-        value: kpis.escalations.value,
-        trend: kpis.escalations.trend,
-        foot: "6,7% del total",
-        spark: kpis.escalations.spark,
-        tint: "alert",
-      }),
-    ),
+    statsHost,
 
     el(
       "div",

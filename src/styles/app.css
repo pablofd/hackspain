@@ -379,6 +379,17 @@ textarea {
   margin-left: auto;
 }
 
+/* Cada vista cuelga aquí sus acciones; queda vacío si no aporta ninguna */
+.topbar__view-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.topbar__view-actions:empty {
+  display: none;
+}
+
 .search {
   position: relative;
   display: flex;
@@ -726,6 +737,21 @@ textarea {
 .stat:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
+}
+
+.stat--link {
+  cursor: pointer;
+}
+
+.stat--link:hover {
+  border-color: var(--stroke-strong);
+}
+
+.stat__go {
+  width: 13px;
+  height: 13px;
+  margin-left: auto;
+  opacity: 0.55;
 }
 
 .stat__label {
@@ -1753,6 +1779,44 @@ table.data .cell-sub {
   display: flex;
 }
 
+.map-full__tally {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Etiquetas sobre las líneas: halo blanco para leerlas encima del trazo */
+.map__edge-label,
+.map__edge-why,
+.map__edge-more {
+  font-size: 13px;
+  fill: var(--text-secondary);
+  paint-order: stroke;
+  stroke: var(--white);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.map__edge-label.is-missed {
+  fill: var(--alert-deep);
+}
+
+.map__edge-why {
+  font-size: 11px;
+  fill: var(--text-muted);
+}
+
+.map__edge-more {
+  font-size: 11.5px;
+  fill: var(--text-muted);
+}
+
+.map__node-sub.is-missed {
+  fill: var(--alert-deep);
+}
+
 .map-full__stage {
   flex: 1;
   min-height: 0;
@@ -1760,6 +1824,15 @@ table.data .cell-sub {
   place-items: center;
   overflow: hidden;
   cursor: grab;
+  touch-action: none;
+}
+
+.map-full__stage.is-grabbing {
+  cursor: grabbing;
+}
+
+.map-full__stage.is-grabbing .map__node {
+  cursor: grabbing;
 }
 
 .map__node {
@@ -1851,6 +1924,11 @@ table.data .cell-sub {
   font-size: 10.5px;
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+.map-person__why {
+  font-size: 10.5px;
+  color: var(--alert-deep);
 }
 
 @media (max-width: 960px) {

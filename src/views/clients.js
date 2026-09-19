@@ -78,7 +78,7 @@ export function render(param) {
 
   function renderDetail() {
     const c = selected;
-    const history = calls.filter((k) => k.caller === c.name);
+    const history = calls.filter((k) => k.caller === c.name).slice(0, 12);
     mount(
       detailHost,
       card(
@@ -126,7 +126,7 @@ export function render(param) {
         ),
       ),
       card(
-        { title: "Historial de llamadas" },
+        { title: "Historial de llamadas", sub: "12 últimas conversaciones" },
         history.length
           ? el(
               "div",

@@ -126,7 +126,7 @@ export const POLICIES = [
   },
 ];
 
-export const calls = [
+const baseCalls = [
   {
     id: "CL-40923",
     caller: "Lucía Benet",
@@ -514,7 +514,198 @@ export const calls = [
       ["agent", "En Avenida del Puerto 31, junto a la parada de metro."],
     ],
   },
+  {
+    id: "CL-40924",
+    caller: "Rosa Calvo",
+    phone: "+34 654 221 907",
+    agent: "Inés",
+    reason: "Cita traumatología",
+    outcome: "pending",
+    sentiment: "negative",
+    duration: "2m 51s",
+    time: "Hoy · 09:05",
+    direction: "Entrante",
+    missReason: "Sin hueco con el Dr. Salas antes de octubre",
+    actions: ["Agenda consultada", "Aviso dejado a recepción"],
+    transcript: [
+      ["caller", "Querría cita con el Dr. Salas esta semana."],
+      ["agent", "Su agenda está completa hasta el 6 de octubre. ¿Le propongo otro traumatólogo?"],
+      ["caller", "No, prefiero esperar a que él tenga hueco."],
+    ],
+  },
+  {
+    id: "CL-40901",
+    caller: "Teresa Ibáñez",
+    phone: "+34 633 118 592",
+    agent: "Lucía",
+    reason: "Cita revisión anual",
+    outcome: "resolved",
+    sentiment: "neutral",
+    duration: "1m 34s",
+    time: "Ayer · 12:40",
+    direction: "Entrante",
+    missReason: "Colgó antes de confirmar el hueco ofrecido",
+    actions: ["Huecos ofrecidos", "Llamada finalizada sin confirmación"],
+    transcript: [
+      ["caller", "Quería la revisión anual, pero ahora no tengo la agenda delante."],
+      ["agent", "Sin problema, le guardo el jueves 25 a las 11:00 durante una hora."],
+    ],
+  },
+  {
+    id: "CL-40900",
+    caller: "Pau Esteve",
+    phone: "+34 677 450 216",
+    agent: "Marc",
+    reason: "Cita fisioterapia",
+    outcome: "pending",
+    sentiment: "neutral",
+    duration: "3m 18s",
+    time: "Ayer · 11:12",
+    direction: "Entrante",
+    missReason: "Cobertura de Adeslas sin confirmar",
+    actions: ["Consulta de póliza enviada", "Tarea creada para admisión"],
+    transcript: [
+      ["caller", "¿Me cubre el seguro las diez sesiones de rehabilitación?"],
+      ["agent", "Tengo que confirmarlo con Adeslas antes de reservar las sesiones."],
+    ],
+  },
 ];
+
+const TODAY = new Date(2026, 8, 18);
+const MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+
+/* "Ahora" y "Hoy · 09:42" son de hoy; "Ayer · 18:05", del día anterior */
+function daysAgoFromLabel(time) {
+  if (/ayer/i.test(time)) return 1;
+  if (/ahora|hoy/i.test(time)) return 0;
+  return 0;
+}
+
+const minutesOfDay = (time) => {
+  if (/ahora/i.test(time)) return 23 * 60 + 59;
+  const [, h, m] = time.match(/(\d{2}):(\d{2})/) || [];
+  return h ? Number(h) * 60 + Number(m) : 0;
+};
+
+/* Reservas: qué llamada buscaba cita y cuál acabó con ella en la agenda */
+const BOOKING_RE = /cita|reprogramar|agenda|hueco|revisión/i;
+const CANCEL_RE = /anul|cancel/i;
+const BOOKED_RE = /cita (creada|movida|reasignada|urgente|confirmada)/i;
+
+function classify(c) {
+  const booked = c.booked ?? c.actions.some((a) => BOOKED_RE.test(a));
+  const wantsBooking =
+    c.wantsBooking ?? (booked || Boolean(c.missReason) || (BOOKING_RE.test(c.reason) && !CANCEL_RE.test(c.reason)));
+  return {
+    ...c,
+    daysAgo: c.daysAgo ?? daysAgoFromLabel(c.time),
+    minute: minutesOfDay(c.time),
+    booked,
+    wantsBooking,
+    // Una llamada en curso todavía puede acabar en cita: no cuenta como fallida
+    missed: wantsBooking && !booked && !c.live,
+  };
+}
+
+/* Generador con semilla: el histórico de demo debe ser el mismo en cada carga */
+function seeded(seed) {
+  return () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const HISTORY_BOOKING = [
+  "Cita cardiología",
+  "Cita dermatología",
+  "Cita pediatría",
+  "Cita traumatología",
+  "Cita ginecología",
+  "Reprogramar cita",
+  "Revisión anual",
+];
+const HISTORY_OTHER = [
+  "Resultados analítica",
+  "Autorización mutua",
+  "Preparación de prueba",
+  "Factura duplicada",
+  "Horario de apertura",
+  "Certificado médico",
+  "Seguimiento post-alta",
+];
+const MISS_REASONS = [
+  "Sin hueco en la franja pedida",
+  "Cobertura del seguro sin confirmar",
+  "Colgó antes de confirmar",
+  "Pedía un profesional sin agenda abierta",
+  "Derivada a recepción y no se cerró",
+  "Necesitaba consultar con un familiar",
+];
+const AGENTS = ["Inés", "Marc", "Lucía"];
+
+/* Historial de 180 días: da recorrido a los rangos de fecha y al mapa de relaciones */
+function buildHistory() {
+  const rand = seeded(20260918);
+  const people = [...new Map(baseCalls.map((c) => [c.caller, c.phone])).entries()];
+  const out = [];
+  let n = 0;
+
+  for (let daysAgo = 2; daysAgo <= 180; daysAgo += 1) {
+    // Densidad uniforme: si el histórico fuese más ralo, las tendencias saldrían disparadas
+    const perDay = 6;
+    for (let i = 0; i < perDay; i += 1) {
+      const [caller, phone] = people[Math.floor(rand() * people.length)];
+      const wantsBooking = rand() < 0.58;
+      const booked = wantsBooking && rand() < 0.74;
+      const missed = wantsBooking && !booked;
+      const escalated = !wantsBooking && rand() < 0.12;
+      const reason = wantsBooking
+        ? HISTORY_BOOKING[Math.floor(rand() * HISTORY_BOOKING.length)]
+        : HISTORY_OTHER[Math.floor(rand() * HISTORY_OTHER.length)];
+      const missReason = missed ? MISS_REASONS[Math.floor(rand() * MISS_REASONS.length)] : undefined;
+      const hour = 8 + Math.floor(rand() * 11);
+      const minute = Math.floor(rand() * 60);
+      const date = new Date(TODAY);
+      date.setDate(date.getDate() - daysAgo);
+      n += 1;
+
+      out.push({
+        id: `CL-${40899 - n}`,
+        caller,
+        phone,
+        agent: AGENTS[Math.floor(rand() * AGENTS.length)],
+        reason,
+        outcome: escalated ? "escalated" : missed && rand() < 0.5 ? "pending" : "resolved",
+        sentiment: missed ? (rand() < 0.5 ? "negative" : "neutral") : rand() < 0.6 ? "positive" : "neutral",
+        duration: `${1 + Math.floor(rand() * 4)}m ${String(Math.floor(rand() * 60)).padStart(2, "0")}s`,
+        time: `${date.getDate()} ${MONTHS[date.getMonth()]} · ${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+        direction: rand() < 0.88 ? "Entrante" : "Saliente",
+        daysAgo,
+        booked,
+        wantsBooking,
+        missReason,
+        actions: booked
+          ? ["Cita creada", "SMS de confirmación enviado"]
+          : missed
+            ? ["Agenda consultada", "Llamada cerrada sin cita"]
+            : escalated
+              ? ["Transferido a enfermería"]
+              : ["Consulta resuelta"],
+        transcript: [
+          ["caller", `Llamaba por ${reason.toLowerCase()}.`],
+          ["agent", booked ? "Le confirmo la cita y le envío el SMS." : "Lo reviso y le digo algo enseguida."],
+        ],
+      });
+    }
+  }
+  return out;
+}
+
+export const calls = [...baseCalls, ...buildHistory()]
+  .map(classify)
+  .sort((a, b) => a.daysAgo - b.daysAgo || b.minute - a.minute);
 
 export const clients = [
   {

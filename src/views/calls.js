@@ -3,38 +3,33 @@ import { icon } from "../lib/icons.js";
 import { card, pill } from "../components/ui.js";
 import { networkPanel } from "../components/network.js";
 import { calls, outcomeLabels, sentimentLabels } from "../data/mock.js";
+import { RANGES, STATES, DEFAULT_RANGE, inRange, matchesState } from "../data/insights.js";
 
 export const meta = {
   title: "Llamadas",
   sub: "Historial de conversaciones, transcripciones y acciones ejecutadas",
 };
 
-const FILTERS = [
-  { id: "all", label: "Todas" },
-  { id: "live", label: "En directo" },
-  { id: "resolved", label: "Resueltas" },
-  { id: "escalated", label: "Escaladas" },
-  { id: "pending", label: "Pendientes" },
+export const actions = () => [
+  el("button", { class: "btn btn--ghost btn--sm" }, icon("download", "nav__icon"), "Exportar CSV"),
 ];
 
-const matches = (c, filter) => {
-  if (filter === "all") return true;
-  if (filter === "live") return Boolean(c.live);
-  return c.outcome === filter;
-};
-
-export function render(param) {
-  let filter = param === "directo" ? "live" : "all";
-  let selected = filter === "live" ? calls.find((c) => c.live) || calls[0] : calls[0];
+export function render(param, query) {
+  const wantedState = query?.get("estado");
+  let filter = STATES.some((s) => s.id === wantedState) ? wantedState : param === "directo" ? "live" : "all";
+  let range = RANGES.some((r) => r.id === query?.get("rango")) ? query.get("rango") : DEFAULT_RANGE;
+  let mapOpen = param === "mapa";
   let signalsOpen = false;
-  let mapOpen = false;
+
+  const visible = () => calls.filter((c) => inRange(c, range) && matchesState(c, filter));
+  let selected = visible()[0] || calls[0];
 
   const heroHost = el("div", { class: "calls__panel" });
   const signalsHost = el("aside", { class: "signals", hidden: true });
   const tbody = el("tbody", {});
 
   function renderRows() {
-    const rows = calls.filter((c) => matches(c, filter));
+    const rows = visible();
     mount(
       tbody,
       ...rows.map((c) =>
@@ -67,7 +62,11 @@ export function render(param) {
             "td",
             {},
             el("div", { class: "cell-main" }, c.reason),
-            el("div", { class: "cell-sub" }, c.direction),
+            el(
+              "div",
+              { class: c.missReason ? "cell-sub text-alert" : "cell-sub" },
+              c.missReason || c.direction,
+            ),
           ),
           el("td", {}, pill(outcomeLabels[c.outcome].text, outcomeLabels[c.outcome].pill.replace("pill--", ""))),
           el("td", { class: `text-sm hide-lg ${sentimentLabels[c.sentiment].cls}` }, sentimentLabels[c.sentiment].text),
@@ -130,22 +129,42 @@ export function render(param) {
   const filterBar = el(
     "div",
     { class: "segmented" },
-    ...FILTERS.map((f) =>
-      el(
-        "button",
-        {
-          class: f.id === filter ? "is-active" : "",
-          onclick: (e) => {
-            filter = f.id;
-            filterBar.querySelectorAll("button").forEach((b) => b.classList.remove("is-active"));
-            e.currentTarget.classList.add("is-active");
-            renderRows();
-          },
-        },
-        f.label,
-      ),
+    ...STATES.map((f) =>
+      el("button", { class: f.id === filter ? "is-active" : "", onclick: () => setState(f.id) }, f.label),
     ),
   );
+
+  const rangeBar = el(
+    "div",
+    { class: "segmented" },
+    ...RANGES.map((r) =>
+      el("button", { class: r.id === range ? "is-active" : "", onclick: () => setRange(r.id) }, r.label),
+    ),
+  );
+
+  const syncBar = (bar, items, active) =>
+    bar.querySelectorAll("button").forEach((b, i) => b.classList.toggle("is-active", items[i].id === active));
+
+  function setState(id) {
+    filter = id;
+    syncBar(filterBar, STATES, filter);
+    refresh();
+  }
+
+  function setRange(id) {
+    range = id;
+    syncBar(rangeBar, RANGES, range);
+    refresh();
+  }
+
+  /* Lista y mapa miran siempre el mismo subconjunto de llamadas */
+  function refresh() {
+    const rows = visible();
+    if (!rows.some((c) => c.id === selected?.id)) selected = rows[0];
+    renderRows();
+    renderHero();
+    if (mapOpen) mount(board, networkPanel(rows, { state: filter, range }));
+  }
 
   renderRows();
 
@@ -182,17 +201,19 @@ export function render(param) {
   const mapBtn = el(
     "button",
     {
-      class: "btn",
+      class: mapOpen ? "btn btn--primary" : "btn",
       onclick: () => {
         mapOpen = !mapOpen;
         mapBtn.classList.toggle("btn--primary", mapOpen);
         mapBtn.lastChild.textContent = mapOpen ? "Ocultar mapa" : "Ver mapa";
-        mount(board, mapOpen ? networkPanel() : grid);
+        mount(board, mapOpen ? networkPanel(visible(), { state: filter, range }) : grid);
       },
     },
     icon("relations", "nav__icon"),
-    el("span", {}, "Ver mapa"),
+    el("span", {}, mapOpen ? "Ocultar mapa" : "Ver mapa"),
   );
+
+  if (mapOpen) mount(board, networkPanel(visible(), { state: filter, range }));
 
   function toggleSignals() {
     signalsOpen = !signalsOpen;
@@ -209,14 +230,7 @@ export function render(param) {
   return el(
     "div",
     { class: "view" },
-    el(
-      "div",
-      { class: "row row--wrap" },
-      filterBar,
-      el("button", { class: "btn btn--ghost" }, icon("filter", "nav__icon"), "Más filtros"),
-      el("button", { class: "btn btn--ghost ml-auto" }, icon("download", "nav__icon"), "Exportar CSV"),
-      mapBtn,
-    ),
+    el("div", { class: "row row--wrap" }, filterBar, rangeBar, mapBtn),
     board,
   );
 }

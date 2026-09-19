@@ -22,13 +22,16 @@ const NAV = [
 const contentHost = el("div", { class: "content", id: "content" });
 const titleNode = el("h1", { class: "topbar__title" });
 const subNode = el("p", { class: "topbar__sub" });
+const topbarActions = el("div", { class: "topbar__view-actions" });
 const navLinks = new Map();
 
-/* El hash admite una subruta opcional: #/llamadas/directo */
+/* El hash admite una subruta y parámetros: #/llamadas/mapa?estado=missed&rango=7d */
 function currentRoute() {
-  const [, segment = "", param = ""] = location.hash.replace(/^#/, "").split("/");
+  const [pathname, search = ""] = location.hash.replace(/^#/, "").split("?");
+  const [, segment = "", param = ""] = pathname.split("/");
   const path = `/${segment}`;
-  return ROUTES[path] ? { path, param } : { path: "/", param: "" };
+  const query = new URLSearchParams(search);
+  return ROUTES[path] ? { path, param, query } : { path: "/", param: "", query };
 }
 
 /* La barra superior reserva el ancho de la barra de scroll para alinearse con las tarjetas */
@@ -38,12 +41,13 @@ function syncScrollGutter() {
 }
 
 function renderRoute() {
-  const { path, param } = currentRoute();
+  const { path, param, query } = currentRoute();
   const route = ROUTES[path];
   titleNode.textContent = route.view.meta.title;
   subNode.textContent = route.view.meta.sub;
   document.title = `${route.view.meta.title} · maio`;
-  mount(contentHost, route.view.render(param));
+  mount(topbarActions, ...(route.view.actions?.() || []));
+  mount(contentHost, route.view.render(param, query));
   contentHost.scrollTop = 0;
   navLinks.forEach((link, key) => link.classList.toggle("is-active", key === path));
   document.body.classList.remove("nav-open");
@@ -142,6 +146,7 @@ function topbar() {
     el(
       "div",
       { class: "topbar__actions" },
+      topbarActions,
       search,
       el("button", { class: "btn btn--icon btn--ghost", title: "Notificaciones" }, icon("bell", "nav__icon")),
     ),

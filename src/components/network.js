@@ -1,37 +1,54 @@
 import { el, mount, svg } from "../lib/dom.js";
 import { icon } from "../lib/icons.js";
-import { calls, clients, outcomeLabels, riskLabels } from "../data/mock.js";
-
+import { calls as allCalls, clients, outcomeLabels, riskLabels } from "../data/mock.js";
+import { DEFAULT_RANGE, rangeById, stateLabel } from "../data/insights.js";
 /** Personas con las que ha hablado maio, agregadas por nombre. */
-export function people() {
+export function people(list) {
   const byCaller = new Map();
-  for (const c of calls) {
-    const e = byCaller.get(c.caller) || { name: c.caller, count: 0, escalated: false };
+  for (const c of list) {
+    const e = byCaller.get(c.caller) || {
+      name: c.caller,
+      count: 0,
+      booked: 0,
+      missed: 0,
+      escalated: false,
+      calls: [],
+    };
     e.count += 1;
+    e.booked += c.booked ? 1 : 0;
+    e.missed += c.missed ? 1 : 0;
     e.escalated = e.escalated || c.outcome === "escalated";
+    e.calls.push(c);
     byCaller.set(c.caller, e);
   }
-  return [...byCaller.values()];
+  return [...byCaller.values()].sort((a, b) => b.missed - a.missed || b.count - a.count);
 }
 
-export function networkPanel() {
+export function networkPanel(list = allCalls, opts = {}) {
+  const { state = "all", range = DEFAULT_RANGE } = opts;
   const host = el("div", { class: "map-full" });
-  const nodes = people();
+  const nodes = people(list);
   let zoom = 1;
+  let pan = { x: 0, y: 0 };
   let selected = null;
   const stage = el("div", { class: "map-full__stage" });
   const personHost = el("div", { class: "map-person", hidden: true });
   const zoomLabel = el("span", { class: "mono" }, "100%");
 
   function paint() {
-    mount(stage, graph(nodes, zoom, selected, pick));
+    mount(stage, graph(nodes, zoom, pan, selected, pick));
     zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+  }
+
+  /* Mover el mapa sólo reescribe el transform: repintarlo entero en cada gesto iría a tirones */
+  function applyPan() {
+    stage.querySelector(".map__viewport")?.setAttribute("transform", viewport(zoom, pan));
   }
 
   function pick(person) {
     selected = selected?.name === person.name ? null : person;
     personHost.hidden = !selected;
-    if (selected) mount(personHost, personCard(selected, () => pick(person)));
+    if (selected) mount(personHost, personCard(selected, range, () => pick(person)));
     paint();
   }
 
@@ -39,6 +56,17 @@ export function networkPanel() {
     zoom = Math.min(2.2, Math.max(0.6, Number(next.toFixed(2))));
     paint();
   }
+
+  function reset() {
+    zoom = 1;
+    pan = { x: 0, y: 0 };
+    paint();
+  }
+
+  const totals = nodes.reduce(
+    (acc, n) => ({ booked: acc.booked + n.booked, missed: acc.missed + n.missed }),
+    { booked: 0, missed: 0 },
+  );
 
   mount(
     host,
@@ -50,25 +78,35 @@ export function networkPanel() {
         "div",
         { style: { minWidth: 0 } },
         el("div", { class: "chat-card__title" }, "Red de maio"),
-        el("div", { class: "chat-card__sub" }, `${nodes.length} personas · ${calls.length} conversaciones`),
+        el(
+          "div",
+          { class: "chat-card__sub truncate" },
+          `${stateLabel(state)} · ${rangeById(range).short} · ${nodes.length} personas · ${list.length} llamadas`,
+        ),
+      ),
+      el(
+        "span",
+        { class: "map-full__tally ml-auto" },
+        `${totals.booked} ${totals.booked === 1 ? "cita cerrada" : "citas cerradas"} · `,
+        el("strong", { class: "text-alert" }, `${totals.missed} sin cerrar`),
       ),
       el(
         "div",
-        { class: "row ml-auto", style: { gap: "6px" } },
+        { class: "row", style: { gap: "6px" } },
         el("button", { class: "btn btn--icon", onclick: () => setZoom(zoom - 0.2), title: "Alejar" }, "−"),
         zoomLabel,
         el("button", { class: "btn btn--icon", onclick: () => setZoom(zoom + 0.2), title: "Ampliar" }, "+"),
-        el("button", { class: "btn btn--sm", onclick: () => setZoom(1) }, "Ajustar"),
+        el("button", { class: "btn btn--sm", onclick: reset }, "Centrar"),
       ),
     ),
     el("div", { class: "map-full__canvas-wrap" }, stage, personHost),
     el(
       "footer",
       { class: "map-full__legend" },
-      el("span", {}, "Pulsa una persona para ver su ficha"),
-      el("span", {}, "Grosor del trazo = número de llamadas"),
-      el("span", { class: "text-alert" }, "Aro rojo = hubo escalado a humano"),
-      el("span", { class: "ml-auto" }, "Rueda del ratón o + / − para ampliar"),
+      el("span", {}, "Pulsa una persona para desplegar sus llamadas"),
+      el("span", {}, "Una línea por llamada con el agente"),
+      el("span", { class: "text-alert" }, "Rojo = reserva que no se cerró"),
+      el("span", { class: "ml-auto" }, "Arrastra para moverte · rueda o + / − para ampliar"),
     ),
   );
 
@@ -77,15 +115,67 @@ export function networkPanel() {
     setZoom(zoom + (e.deltaY < 0 ? 0.1 : -0.1));
   });
 
-  paint();
+  let drag = null;
+  let dragged = false;
+
+  stage.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    drag = { x: e.clientX, y: e.clientY, from: { ...pan }, moved: false };
+  });
+
+  stage.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x;
+    const dy = e.clientY - drag.y;
+    if (!drag.moved) {
+      if (Math.abs(dx) <= 4 && Math.abs(dy) <= 4) return;
+      // Capturar antes de tiempo desviaría al lienzo el clic que selecciona a una persona
+      drag.moved = true;
+      stage.setPointerCapture(e.pointerId);
+      stage.classList.add("is-grabbing");
+    }
+    const k = unitsPerPixel(stage);
+    pan = { x: drag.from.x + dx * k, y: drag.from.y + dy * k };
+    applyPan();
+  });
+
+  const endDrag = (e) => {
+    if (!drag) return;
+    if (drag.moved) {
+      stage.releasePointerCapture?.(e.pointerId);
+      stage.classList.remove("is-grabbing");
+    }
+    dragged = drag.moved;
+    drag = null;
+  };
+
+  stage.addEventListener("pointerup", endDrag);
+  stage.addEventListener("pointercancel", endDrag);
+
+  // Arrastrar sobre una persona no debe abrir su ficha
+  stage.addEventListener(
+    "click",
+    (e) => {
+      if (!dragged) return;
+      dragged = false;
+      e.stopPropagation();
+      e.preventDefault();
+    },
+    true,
+  );
+
+  if (nodes.length) paint();
+  else mount(stage, el("div", { class: "empty" }, "Ninguna llamada con este filtro."));
+
   return host;
 }
 
 /* Ficha rápida de la persona seleccionada en el mapa */
-function personCard(person, onClose) {
-  const history = calls.filter((c) => c.caller === person.name);
+function personCard(person, range, onClose) {
+  const history = person.calls;
   const last = history[0];
   const client = findClient(person, last);
+  const missed = history.filter((c) => c.missed);
 
   return el(
     "article",
@@ -107,10 +197,12 @@ function personCard(person, onClose) {
       { class: "kv" },
       el("dt", {}, "Teléfono"),
       el("dd", { class: "mono" }, client?.phone || last?.phone || "—"),
-      el("dt", {}, "Conversaciones"),
-      el("dd", {}, `${person.count} con maio`),
-      el("dt", {}, "Última"),
-      el("dd", {}, last ? `${last.reason} · ${last.time}` : "—"),
+      el("dt", {}, "Llamadas"),
+      el("dd", {}, `${person.count} · ${rangeById(range).short}`),
+      el("dt", {}, "Citas cerradas"),
+      el("dd", {}, String(person.booked)),
+      el("dt", {}, "Sin cerrar"),
+      el("dd", { class: person.missed ? "text-alert" : "" }, String(person.missed)),
       el("dt", {}, "Próxima cita"),
       el("dd", {}, client?.nextAppt || "Sin cita registrada"),
     ),
@@ -121,11 +213,30 @@ function personCard(person, onClose) {
         ...client.tags.map((t) => el("span", { class: "chip" }, t)),
         pill(riskLabels[client.risk].text, riskLabels[client.risk].pill.replace("pill--", "")),
       ),
-    history.length &&
+    missed.length > 0 &&
       el(
         "div",
         { class: "map-person__history" },
-        el("div", { class: "section-title" }, "Historial"),
+        el("div", { class: "section-title" }, `Reservas sin cerrar (${missed.length})`),
+        ...missed.slice(0, 6).map((h) =>
+          el(
+            "div",
+            { class: "map-person__row" },
+            el(
+              "div",
+              { style: { minWidth: 0 } },
+              el("div", { class: "truncate" }, h.reason),
+              el("div", { class: "map-person__why truncate" }, h.missReason || "Cerró sin cita"),
+            ),
+            el("span", { class: "map-person__tag" }, h.time),
+          ),
+        ),
+      ),
+    history.length > 0 &&
+      el(
+        "div",
+        { class: "map-person__history" },
+        el("div", { class: "section-title" }, "Últimas llamadas"),
         ...history.slice(0, 3).map((h) =>
           el(
             "div",
@@ -175,13 +286,45 @@ function portrait(name) {
   return `https://i.pravatar.cc/160?img=${hash + 1}`;
 }
 
-function graph(nodes, zoom, selected, onSelect) {
-  const w = 1200;
-  const h = 760;
+const W = 1200;
+const H = 760;
+
+const viewport = (zoom, pan) =>
+  `translate(${pan.x.toFixed(1)} ${pan.y.toFixed(1)}) translate(${W / 2} ${H / 2}) scale(${zoom}) translate(${-W / 2} ${-H / 2})`;
+
+/* Un píxel de pantalla vale más de una unidad del viewBox: el lienzo se escala para caber */
+function unitsPerPixel(stage) {
+  const box = stage.querySelector("svg")?.getBoundingClientRect();
+  if (!box?.width) return 1;
+  return 1 / Math.min(box.width / W, box.height / H);
+}
+
+const edgeColor = (c) =>
+  c.missed ? "var(--lipstick-red)" : c.booked ? "var(--pitch-black)" : "rgba(var(--ink-rgb), 0.45)";
+
+/* Curva centro -> persona; devuelve también el punto en el parámetro t para colgar la etiqueta */
+function curve(cx, cy, x, y, angle, bend, t = 0.5) {
+  const mx = (cx + x) / 2 - Math.sin(angle) * bend;
+  const my = (cy + y) / 2 + Math.cos(angle) * bend;
+  const k = (1 - t) ** 2;
+  const k2 = 2 * (1 - t) * t;
+  const k3 = t ** 2;
+  return {
+    d: `M${cx} ${cy} Q${mx.toFixed(1)} ${my.toFixed(1)} ${x.toFixed(1)} ${y.toFixed(1)}`,
+    at: { x: k * cx + k2 * mx + k3 * x, y: k * cy + k2 * my + k3 * y },
+  };
+}
+
+const MAX_EDGES = 6;
+
+function graph(nodes, zoom, pan, selected, onSelect) {
+  const w = W;
+  const h = H;
   const cx = w / 2;
   const cy = h / 2;
   const clips = [];
   const edges = [];
+  const labels = [];
   const dots = [];
 
   const inner = nodes.slice(0, Math.ceil(nodes.length / 2));
@@ -195,22 +338,58 @@ function graph(nodes, zoom, selected, onSelect) {
       const isOn = selected?.name === n.name;
       // El trazo va de centro a centro: los círculos opacos lo rematan en sus bordes
       const bend = (i % 2 ? 1 : -1) * (18 + (i % 3) * 9);
-      const mid = {
-        x: (cx + x) / 2 - Math.sin(angle) * bend,
-        y: (cy + y) / 2 + Math.cos(angle) * bend,
-      };
 
-      edges.push(
-        svg("path", {
-          d: `M${cx} ${cy} Q${mid.x.toFixed(1)} ${mid.y.toFixed(1)} ${x.toFixed(1)} ${y.toFixed(1)}`,
-          fill: "none",
-          stroke: isOn ? "var(--pitch-black)" : "rgba(var(--ink-rgb), 0.26)",
-          "stroke-width": isOn ? 1.8 : 0.6 + Math.min(n.count, 4) * 0.25,
-          "stroke-linecap": "round",
-        }),
-      );
+      if (isOn) {
+        // Al seleccionar, la relación se abre en una línea por llamada con su desenlace
+        const shown = [...n.calls].sort((a, b) => Number(b.missed) - Number(a.missed)).slice(0, MAX_EDGES);
+        shown.forEach((c, j) => {
+          // Las etiquetas se escalonan a lo largo del trazo: es donde hay sitio
+          const t = shown.length > 1 ? 0.28 + (j / (shown.length - 1)) * 0.44 : 0.5;
+          const { d, at } = curve(cx, cy, x, y, angle, (j - (shown.length - 1) / 2) * 54, t);
+          edges.push(
+            svg("path", {
+              d,
+              fill: "none",
+              stroke: edgeColor(c),
+              "stroke-width": c.missed ? 1.9 : 1.2,
+              "stroke-dasharray": c.missed ? "6 4" : null,
+              "stroke-linecap": "round",
+            }),
+          );
+          labels.push(
+            svg(
+              "text",
+              { x: at.x, y: at.y - 3, "text-anchor": "middle", class: `map__edge-label${c.missed ? " is-missed" : ""}` },
+              `${c.reason} · ${c.time}`,
+            ),
+            c.missReason &&
+              svg("text", { x: at.x, y: at.y + 11, "text-anchor": "middle", class: "map__edge-why" }, c.missReason),
+          );
+        });
+        if (n.calls.length > shown.length) {
+          const { at } = curve(cx, cy, x, y, angle, 0, 0.92);
+          labels.push(
+            svg(
+              "text",
+              { x: at.x, y: at.y, "text-anchor": "middle", class: "map__edge-more" },
+              `+${n.calls.length - shown.length} llamadas más en el plazo`,
+            ),
+          );
+        }
+      } else {
+        edges.push(
+          svg("path", {
+            d: curve(cx, cy, x, y, angle, bend).d,
+            fill: "none",
+            stroke: n.missed ? "var(--lipstick-red)" : "rgba(var(--ink-rgb), 0.26)",
+            "stroke-opacity": n.missed ? 0.5 : 1,
+            "stroke-width": 0.6 + Math.min(n.count, 6) * 0.22,
+            "stroke-linecap": "round",
+          }),
+        );
+      }
 
-      const clipId = `mf-${Math.random().toString(36).slice(2, 7)}`;
+      const clipId = `mf-${norm(n.name).replace(/[^a-z0-9]/g, "")}`;
       clips.push(svg("clipPath", { id: clipId }, svg("circle", { cx: x, cy: y, r: 23 })));
 
       dots.push(
@@ -234,23 +413,25 @@ function graph(nodes, zoom, selected, onSelect) {
             fill: "none",
             stroke: isOn
               ? "var(--pitch-black)"
-              : n.escalated
+              : n.missed
                 ? "var(--lipstick-red)"
                 : "rgba(var(--ink-rgb), 0.35)",
-            "stroke-width": isOn ? 2.4 : n.escalated ? 1.8 : 1,
+            "stroke-width": isOn ? 2.4 : n.missed ? 1.8 : 1,
           }),
           svg("text", { x, y: y + 41, "text-anchor": "middle", class: "map__node-label" }, n.name),
           svg(
             "text",
-            { x, y: y + 54, "text-anchor": "middle", class: "map__node-sub" },
-            `${n.count} ${n.count === 1 ? "llamada" : "llamadas"}`,
+            { x, y: y + 54, "text-anchor": "middle", class: `map__node-sub${n.missed ? " is-missed" : ""}` },
+            n.missed
+              ? `${n.missed} sin cerrar de ${n.count}`
+              : `${n.count} ${n.count === 1 ? "llamada" : "llamadas"}`,
           ),
         ),
       );
     });
 
   place(inner, 300, 210, 0);
-  place(outer, 500, 330, Math.PI / outer.length);
+  place(outer, 500, 330, Math.PI / Math.max(outer.length, 1));
 
   return svg(
     "svg",
@@ -258,7 +439,7 @@ function graph(nodes, zoom, selected, onSelect) {
     svg("defs", {}, ...clips),
     svg(
       "g",
-      { transform: `translate(${cx} ${cy}) scale(${zoom}) translate(${-cx} ${-cy})` },
+      { class: "map__viewport", transform: viewport(zoom, pan) },
       ...edges,
       ...dots,
       svg("circle", { cx, cy, r: 56, fill: "var(--pitch-black)" }),
@@ -287,6 +468,7 @@ function graph(nodes, zoom, selected, onSelect) {
         { x: cx, y: cy + 78, "text-anchor": "middle", "font-size": "13", fill: "var(--text-primary)" },
         "maio",
       ),
+      ...labels,
     ),
   );
 }

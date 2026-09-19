@@ -1,4 +1,5 @@
 import { el, svg } from "../lib/dom.js";
+import { icon } from "../lib/icons.js";
 
 export function card(props = {}, ...children) {
   const { title, sub, actions, tint, flush, class: cls = "" } = props;
@@ -31,19 +32,36 @@ export function pill(text, variant = "neutral", withDot = false) {
   );
 }
 
-export function stat({ label, value, unit, trend, foot, spark, tint }) {
+export function stat({ label, value, unit, trend, foot, spark, tint, onClick, lowerIsBetter }) {
   const up = trend > 0;
+  const flat = trend === 0;
+  const good = lowerIsBetter ? !up : up;
   return el(
     "article",
-    { class: `stat grain${tint ? ` card--tint-${tint}` : ""}` },
+    {
+      class: `stat grain${tint ? ` card--tint-${tint}` : ""}${onClick ? " stat--link" : ""}`,
+      ...(onClick
+        ? {
+            onclick: onClick,
+            role: "button",
+            tabindex: "0",
+            onkeydown: (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onClick(e)),
+          }
+        : {}),
+    },
     el("span", { class: "stat__label" }, label),
     el("div", { class: "stat__value" }, String(value), unit && el("small", {}, unit)),
     el(
       "div",
       { class: "stat__foot" },
       trend != null &&
-        el("span", { class: `trend trend--${up ? "up" : "down"}` }, `${up ? "▲" : "▼"} ${Math.abs(trend)}%`),
+        el(
+          "span",
+          { class: `trend${flat ? "" : ` trend--${good ? "up" : "down"}`}` },
+          flat ? "= 0%" : `${up ? "▲" : "▼"} ${Math.abs(trend)}%`,
+        ),
       foot && el("span", {}, foot),
+      onClick && icon("arrowUpRight", "stat__go"),
     ),
     spark && sparkline(spark, "var(--dusty-denim)"),
   );
