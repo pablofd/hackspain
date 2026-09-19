@@ -7,10 +7,23 @@ import { AppError } from "../src/errors.js";
 try {
   const { values } = parseArgs({ options: {
     endpoint: { type: "string" }, "record-audio": { type: "boolean" }, "output-gain-db": { type: "string" },
+    "voice-connector": { type: "string" }, "live-deployment": { type: "string" },
+    "live-backend": { type: "string" }, "live-output-gain-db": { type: "string" },
   } });
   const outputGain = values["output-gain-db"] === undefined ? undefined : Number(values["output-gain-db"]);
   if (outputGain !== undefined && (!Number.isFinite(outputGain) || outputGain < 0 || outputGain > 12)) {
     throw new AppError("invalid_output_gain", "Output gain must be between 0 and 12 dB.");
+  }
+  const connector = values["voice-connector"];
+  if (connector !== undefined && connector !== "realtime" && connector !== "live") {
+    throw new AppError("invalid_voice_connector", "Choose realtime or live; no configuration was changed.");
+  }
+  const liveGain = values["live-output-gain-db"] === undefined ? undefined : Number(values["live-output-gain-db"]);
+  if (liveGain !== undefined && (!Number.isFinite(liveGain) || liveGain < 0 || liveGain > 12)) {
+    throw new AppError("invalid_output_gain", "Output gain must be between 0 and 12 dB.");
+  }
+  for (const value of [values["live-deployment"], values["live-backend"]]) {
+    if (value !== undefined && (!value.trim() || /[\r\n]/.test(value))) throw new AppError("invalid_deployment");
   }
   const environment = readEnvironment();
   const endpoint = values.endpoint ?? environment.AZURE_OPENAI_ENDPOINT;
@@ -37,6 +50,10 @@ try {
     set("CALL_AUDIO_RECORDING_ENABLED", "true");
   }
   if (outputGain !== undefined) set("VOICE_OUTPUT_GAIN_DB", String(outputGain));
+  if (connector !== undefined) set("VOICE_CONNECTOR", connector);
+  if (values["live-deployment"] !== undefined) set("AZURE_OPENAI_LIVE_DEPLOYMENT", values["live-deployment"].trim());
+  if (values["live-backend"] !== undefined) set("AZURE_OPENAI_LIVE_BACKEND_DEPLOYMENT", values["live-backend"].trim());
+  if (liveGain !== undefined) set("VOICE_LIVE_OUTPUT_GAIN_DB", String(liveGain));
   writeFileSync(".env.local", contents, { mode: 0o600 });
   chmodSync(".env.local", 0o600);
   if (existsSync(".env.lang")) chmodSync(".env.lang", 0o600);

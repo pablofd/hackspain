@@ -31,6 +31,8 @@ code. Use synthetic fixtures and normal API lookups instead.
 | File | Responsibility |
 | --- | --- |
 | `src/azure-realtime.ts` | Azure OpenAI Realtime connection, audio, turns, transcription and tool dispatch. |
+| `src/azure-live.ts`, `src/live-transcript.ts` | Isolated experimental GPT-Live connection, Responses delegation and conservative fragment-based confirmation guards. |
+| `src/voice-provider.ts` | Explicit connector selection and independent model/gain profiles; no automatic fallback. |
 | `src/receptionist.ts` | Runtime instructions, tool schemas, verified patients, slots, proposals, confirmations and outcomes. |
 | `src/prosper.ts`, `src/prosper-types.ts` | Authenticated clinic/submission requests, runtime schemas, receipts and normalization. |
 | `src/scheduling.ts` | Deterministic Madrid date phrases, date windows, age, closures and site openings. |
@@ -48,6 +50,9 @@ code. Use synthetic fixtures and normal API lookups instead.
 - The runtime is Node.js 24+, ESM, Azure OpenAI Realtime. Jev/AI Gateway is not
   enabled in live calls. `scripts/check-jev.ts` is an opt-in synthetic benchmark
   only; do not introduce a live provider merely to fix a deterministic workflow.
+- `VOICE_CONNECTOR=live` is a separately authorized GPT-Live experiment, not a
+  modification of `src/azure-realtime.ts`. Its voice deployment and Responses
+  backend use the same Azure resource with independent configuration.
 - Preserve the working Azure protocol and mu-law audio configuration. Do not
   mix preview and GA event schemas without an explicit integration change.
   `VOICE_OUTPUT_GAIN_DB` is an optional 0-12 dB output-only level adjustment;
@@ -67,6 +72,37 @@ code. Use synthetic fixtures and normal API lookups instead.
 - Update **Error history and lessons learned** below for each investigated
   failure. Record evidence, cause, correction, regression and remaining limits.
   Distinguish a local fix, an accepted API receipt and a passing judge verdict.
+
+### Experimental GPT-Live profile
+
+- `npm run start:live` selects the Live connector explicitly.
+  `npm run start:realtime-1.5` restores the original deployment; the
+  `start:realtime-2` preset is a later, separate deployment experiment.
+  None of these commands stops an existing process. Check zero active calls,
+  stop only the voice server and preserve the tunnel and endpoint token.
+- `npm run configure -- --voice-connector live|realtime` persists selection for
+  `npm start`. Defaults are `gpt-live-1`, backend `gpt-5.4-mini`, voice `coral`.
+  Live output gain is independently configured by `VOICE_LIVE_OUTPUT_GAIN_DB`
+  (default 0); do not carry a measured Realtime gain into Live by assumption.
+- The Live WebSocket uses `/openai/v1/live/sessions` without the preview query.
+  Native PCMU/8000 and coral were accepted by the deployed Azure model despite
+  an older Azure guide describing PCM-only input. Validate `session.started`;
+  never forward a different codec as mu-law or silently fall back to Realtime.
+- Send real-time input silence between caller frames. There is no Live
+  audio-done or authoritative caller-turn-completed event. Preserve caption
+  fragments, repetition and timestamp ranges privately; do not deduplicate words.
+  New captions invalidate stale work. Confirmations require a later known Live
+  delegation, stable explicit approval and the existing receptionist guards.
+- Read functions from nested `response.output_item.done`, not terminal
+  `response.output` (which is empty). Azure continuations can begin with
+  `response.in_progress` without another `response.created`. Correlate lifecycle,
+  delegation and call IDs, return each result and explicitly continue once.
+- Backend completion is not spoken completion. The existing bounded audio queue
+  and silence tail remain; Live interruption notices are not authoritative
+  provider-audio truncation. Do not send preview cancel/truncate events to Live.
+- Close with `session.close`, wait up to 15 seconds for `session.closed` and final
+  cumulative usage, and explicitly report missing finalization. Already-confirmed
+  POSTs may finish; disconnects must never authorize new writes.
 
 ## Scoring: current rules, not the earlier 49-point version
 
@@ -380,6 +416,8 @@ problems or promote a synthetic evaluation to a Prosper judge result.
 
 | Problem/type | Observed failure and cause | Correction / regression / status |
 | --- | --- | --- |
+| GPT-Live protocol / isolated adapter (synthetic Azure, 19 Sep) | The Live deployment rejected the Realtime operation. On its own endpoint, the first real delegated tool succeeded, but a continuation omitted response.created and the adapter rejected its terminal ID as unknown. | Separate Live endpoint/profile leaves the Realtime connector unchanged. Track response.in_progress as well as response.created, with an offline continuation regression. A real Live read-only conversation completed a fake catalogue lookup, backend continuation, nonzero audio and confirmed close; no Prosper request or judge result. |
+| GPT-Live booking / delegated intent (synthetic Azure, 19 Sep) | A spoken appointment request with name and birth date incorrectly entered collect_registration without any request to register. The delegated backend selected the wrong workflow; this was not a clinic API refusal or Prosper failure. | Explicit booking-versus-registration guidance in both Live and backend instructions; shared receptionist/identity checks unchanged. Replaying the same synthetic audio through the real local /ws pipeline produced the exact intercepted BOOK after spoken readback, later approval and a new delegation; final speech and session close completed in about 69 seconds. One invented request ID was explicitly rejected and recovered. All clinic routes were fake; this is not a Prosper judge pass or full case coverage. |
 | `the_rules` - single-plan coverage (practice, 18 Sep 21:30 UTC) | Expected NO_ACTION(specialty_not_covered), submitted nothing. The agent explained the exclusion, heard that there was no second plan, then offered speculative private payment and ended. Local metadata shows successful find_patient/get_clinic/search_availability but NO report_outcome call. | Structured no_booking guidance; mandatory report before farewell; explicit single-plan answer; no private-pay fallback; current-query evidence only. Regressions are in `test/receptionist.test.ts`. Two synthetic Azure refusal conversations and one second-policy booking produced the expected intercepted actions, with no real Prosper requests. A new Prosper verdict is still required. |
 | `simple_booking` - original skeleton | Conversation worked, but Missing record because the read-only prototype had no submission tools. | Separate lookup, proposal and confirmed POST; use authoritative callSid. Exact payload and no-early-submit regressions exist. API acknowledgement is not a judge pass. |
 | Identification / tool arguments | The voice model asked for a third identifier despite name + DNI, and emitted lowercase action verbs that failed the tool schema. | Name plus ONE corroborating field is enough; retry the lookup before asking more. Normalize verbs only, never IDs. Covered by lookup/action-case regressions. |

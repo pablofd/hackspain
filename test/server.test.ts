@@ -82,6 +82,7 @@ async function exerciseConcurrentCalls(count: number, recordAudio = false): Prom
       capabilities: ["voice", "clinic", "book", "reschedule", "cancel", "register", "outcomes"],
       localRecording: recordAudio,
       localAudioRecording: recordAudio,
+      voiceConnector: "realtime", voiceDeployment: settings.AZURE_OPENAI_DEPLOYMENT, voiceOutputGainDb: 0,
     });
     if (directory) {
       const files = readdirSync(directory);
@@ -147,6 +148,46 @@ test("optional output gain changes only emitted audio, preserving incoming bytes
     assert.ok(after > before * 2 && after < before * 3.2);
     const ended = once(client, "close");
     client.send(JSON.stringify({ event: "stop", streamSid: "stream-gain" }));
+    await ended;
+  } finally {
+    await server.close();
+  }
+});
+
+test("Live health and output use the independent profile instead of Realtime gain", { timeout: 5000 }, async () => {
+  const settings = config({
+    VOICE_CONNECTOR: "live", VOICE_OUTPUT_GAIN_DB: "9", VOICE_LIVE_OUTPUT_GAIN_DB: "0",
+  });
+  const incoming = Buffer.alloc(160, 0xd0);
+  const server = createVoiceServer(settings, async (call) => ({
+    sendAudio(payload) {
+      call.onAudio({ audio: decodeAudio(payload), itemId: "live-profile", contentIndex: 0 });
+      call.onAudioDone("live-profile");
+    },
+    sendText() {},
+    async close() {},
+  }), "console");
+  const port = await server.listen();
+  try {
+    const health = z.object({
+      voiceConnector: z.string(), voiceDeployment: z.string(), voiceBackendDeployment: z.string(), voiceOutputGainDb: z.number(),
+    }).parse(await fetch(`http://127.0.0.1:${port}/healthz`).then((response) => response.json()));
+    assert.deepEqual(health, {
+      voiceConnector: "live", voiceDeployment: "gpt-live-1", voiceBackendDeployment: "gpt-5.4-mini", voiceOutputGainDb: 0,
+    });
+    const client = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+      headers: { Authorization: `Bearer ${settings.VOICE_ENDPOINT_TOKEN}` },
+    });
+    await once(client, "open");
+    const response = once(client, "message");
+    client.send(JSON.stringify(start("live-profile")));
+    client.send(JSON.stringify({ event: "media", streamSid: "stream-live-profile", media: { payload: incoming.toString("base64") } }));
+    const [raw] = await response;
+    const packet = parsePacket(String(raw));
+    assert.ok(packet.event === "media");
+    assert.deepEqual(decodeAudio(packet.media.payload), incoming);
+    const ended = once(client, "close");
+    client.send(JSON.stringify({ event: "stop", streamSid: "stream-live-profile" }));
     await ended;
   } finally {
     await server.close();

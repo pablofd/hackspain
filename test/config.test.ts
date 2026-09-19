@@ -78,3 +78,62 @@ test("configuring output gain preserves endpoint credentials and rejects invalid
     rmSync(directory, { recursive: true });
   }
 });
+
+test("Live configuration is opt-in, separately bounded, and preserves the default Realtime profile", () => {
+  const settings = config({ VOICE_CONNECTOR: "live", VOICE_OUTPUT_GAIN_DB: "9" });
+  assert.equal(config().VOICE_CONNECTOR, "realtime");
+  assert.equal(settings.AZURE_OPENAI_DEPLOYMENT, "gpt-realtime-1.5");
+  assert.equal(settings.AZURE_OPENAI_API_VERSION, "2024-10-01-preview");
+  assert.equal(settings.AZURE_OPENAI_LIVE_DEPLOYMENT, "gpt-live-1");
+  assert.equal(settings.AZURE_OPENAI_LIVE_BACKEND_DEPLOYMENT, "gpt-5.4-mini");
+  assert.equal(settings.AZURE_OPENAI_LIVE_VOICE, "coral");
+  assert.equal(settings.VOICE_OUTPUT_GAIN_DB, 9);
+  assert.equal(settings.VOICE_LIVE_OUTPUT_GAIN_DB, 0);
+  assert.throws(() => config({ VOICE_CONNECTOR: "unknown" }), /VOICE_CONNECTOR/);
+  for (const value of ["-1", "13", "NaN", "Infinity"]) {
+    assert.throws(() => config({ VOICE_LIVE_OUTPUT_GAIN_DB: value }), /VOICE_LIVE_OUTPUT_GAIN_DB/);
+  }
+});
+
+test("the explicit Live switch preserves Realtime settings and credentials through a switch back", () => {
+  const directory = mkdtempSync(join(tmpdir(), "hackspain-voice-switch-"));
+  const path = join(directory, ".env.local");
+  const original = [
+    "AZURE_OPENAI_ENDPOINT=https://synthetic.openai.azure.com",
+    "VOICE_ENDPOINT_TOKEN=synthetic-existing-token-unchanged",
+    "PROSPER_API_KEY=synthetic-preserved-key",
+    "AZURE_OPENAI_DEPLOYMENT=gpt-realtime-1.5",
+    "AZURE_OPENAI_API_VERSION=2024-10-01-preview",
+    "VOICE_OUTPUT_GAIN_DB=9",
+    "",
+  ].join("\n");
+  writeFileSync(path, original, { mode: 0o600 });
+  const command = ["--import", import.meta.resolve("tsx"), resolve("scripts/configure-local.ts")];
+  try {
+    const output = execFileSync(process.execPath, [...command,
+      "--voice-connector", "live", "--live-deployment", "live-synthetic",
+      "--live-backend", "backend-synthetic", "--live-output-gain-db", "3",
+    ], { cwd: directory, env: {}, encoding: "utf8" });
+    assert.ok(readFileSync(path, "utf8").startsWith(original));
+    const live = readEnvironment(directory, {});
+    assert.equal(live.VOICE_CONNECTOR, "live");
+    assert.equal(live.AZURE_OPENAI_LIVE_DEPLOYMENT, "live-synthetic");
+    assert.equal(live.AZURE_OPENAI_LIVE_BACKEND_DEPLOYMENT, "backend-synthetic");
+    assert.equal(live.VOICE_LIVE_OUTPUT_GAIN_DB, "3");
+    assert.ok(!output.includes("synthetic-existing-token"));
+    assert.ok(!output.includes("synthetic-preserved-key"));
+    execFileSync(process.execPath, [...command, "--voice-connector", "realtime"], { cwd: directory, env: {}, stdio: "pipe" });
+    assert.deepEqual(readEnvironment(directory, {}), { ...live, VOICE_CONNECTOR: "realtime" });
+    const contents = readFileSync(path, "utf8");
+    for (const args of [
+      ["--voice-connector", "unknown"], ["--live-deployment", ""],
+      ["--live-backend", "backend\nVOICE_ENDPOINT_TOKEN=changed"],
+      ["--live-output-gain-db", "13"],
+    ]) {
+      assert.throws(() => execFileSync(process.execPath, [...command, ...args], { cwd: directory, env: {}, stdio: "pipe" }));
+      assert.equal(readFileSync(path, "utf8"), contents);
+    }
+  } finally {
+    rmSync(directory, { recursive: true });
+  }
+});

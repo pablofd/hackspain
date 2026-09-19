@@ -5,15 +5,17 @@ import { log, startTelemetry } from "./telemetry.js";
 async function main(): Promise<void> {
   const config = loadConfig();
   const telemetry = startTelemetry(config);
-  const [{ createVoiceServer }, { createAzureVoiceFactory }, { ProsperClient }] = await Promise.all([
+  const [{ createVoiceServer }, { createConfiguredVoiceFactory, voiceProfile }, { ProsperClient }] = await Promise.all([
     import("./server.js"),
-    import("./azure-realtime.js"),
+    import("./voice-provider.js"),
     import("./prosper.js"),
   ]);
-  const server = createVoiceServer(config, createAzureVoiceFactory(config, new ProsperClient(config)), telemetry.mode);
+  const server = createVoiceServer(config, createConfiguredVoiceFactory(config, new ProsperClient(config)), telemetry.mode);
   try {
     const port = await server.listen();
-    log("info", "server.listening", { host: config.HOST, port, telemetry: telemetry.mode });
+    log("info", "server.listening", {
+      host: config.HOST, port, telemetry: telemetry.mode, ...voiceProfile(config),
+    });
   } catch (error) {
     await telemetry.shutdown();
     throw error;

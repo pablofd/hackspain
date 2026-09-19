@@ -11,6 +11,7 @@ import type { Config } from "./config.js";
 import { AppError, errorCode } from "./errors.js";
 import { decodeAudio, parsePacket } from "./protocol.js";
 import { log } from "./telemetry.js";
+import { voiceProfile } from "./voice-provider.js";
 
 type CallRecordStore = ReturnType<typeof createCallRecordStore>;
 type CallRecorder = ReturnType<CallRecordStore["start"]>;
@@ -28,7 +29,8 @@ export function createVoiceServer(
   telemetryMode: "azure" | "console",
   recordStore?: CallRecordStore,
 ) {
-  const outputGain = createMuLawGain(config.VOICE_OUTPUT_GAIN_DB);
+  const profile = voiceProfile(config);
+  const outputGain = createMuLawGain(profile.outputGainDb);
   const records = recordStore ?? (config.CALL_RECORDING_ENABLED ? createCallRecordStore({
     directory: resolve(".local/calls"),
     retentionDays: config.CALL_RECORDING_RETENTION_DAYS,
@@ -53,6 +55,10 @@ export function createVoiceServer(
         capabilities: ["voice", "clinic", "book", "reschedule", "cancel", "register", "outcomes"],
         localRecording: Boolean(records),
         localAudioRecording: Boolean(records && config.CALL_AUDIO_RECORDING_ENABLED),
+        voiceConnector: profile.connector,
+        voiceDeployment: profile.deployment,
+        ...("backendDeployment" in profile ? { voiceBackendDeployment: profile.backendDeployment } : {}),
+        voiceOutputGainDb: profile.outputGainDb,
       }));
       return;
     }
@@ -159,7 +165,7 @@ export function createVoiceServer(
               "gen_ai.operation.name": "invoke_agent",
               "gen_ai.agent.name": "cachopo",
               "gen_ai.system": "azure.ai.openai",
-              "gen_ai.request.model": config.AZURE_OPENAI_DEPLOYMENT,
+              "gen_ai.request.model": profile.deployment,
               "prosper.call_id": callId,
             },
           }, ROOT_CONTEXT);
@@ -195,7 +201,7 @@ export function createVoiceServer(
               return audio.interruptAll();
             },
             onFailure: fail,
-            onTurnDone: () => span?.addEvent("voice.turn_completed"),
+            onTurnDone: () => span?.addEvent(profile.connector === "live" ? "voice.backend_completed" : "voice.turn_completed"),
           }).then(async (session) => {
             voice = session;
             if (closed) { await session.close(); return; }

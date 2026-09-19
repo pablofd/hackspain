@@ -13,7 +13,7 @@ import { AppError } from "./errors.js";
 
 export type CallRecordEvent =
   // Assistant text describes generated audio, not verified playback; retain interruptions alongside it.
-  | { type: "transcript"; speaker: "user" | "assistant"; itemId: string; text: string; partial?: boolean }
+  | { type: "transcript"; speaker: "user" | "assistant"; itemId: string; text: string; partial?: boolean; startMs?: number; endMs?: number }
   | { type: "interruption"; itemId?: string; audioEndMs?: number; reason?: "caller" | "output_limit" | "provider_cancelled" }
   | { type: "tool"; name: string; status: "ok" | "error"; code?: string; details?: unknown }
   | {
@@ -255,9 +255,15 @@ function eventFields(event: CallRecordEvent): Record<string, unknown> {
       if (event.partial !== undefined && typeof event.partial !== "boolean") {
         throw new RecordFailure("call_recording_invalid_event");
       }
+      if (event.startMs !== undefined || event.endMs !== undefined) {
+        if (typeof event.startMs !== "number" || typeof event.endMs !== "number" ||
+            !Number.isFinite(event.startMs) || !Number.isFinite(event.endMs) ||
+            event.startMs < 0 || event.endMs < event.startMs) throw new RecordFailure("call_recording_invalid_event");
+      }
       return {
         type: event.type, speaker: event.speaker, itemId: event.itemId, text: event.text,
         ...(event.partial === undefined ? {} : { partial: event.partial }),
+        ...(event.startMs === undefined ? {} : { startMs: event.startMs, endMs: event.endMs }),
       };
     case "interruption": {
       const fields: Record<string, unknown> = { type: event.type };

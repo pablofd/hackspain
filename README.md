@@ -1,8 +1,9 @@
 # Cachopo - Foundry voice receptionist
 
 A TypeScript backend for the Prosper HackSpain challenge. It adapts Prosper's
-Twilio Media Streams protocol to Azure OpenAI Realtime in Foundry, following
+Twilio Media Streams protocol to Azure OpenAI Realtime in Foundry by default, following
 the already-working WebSocket approach from the team's language-learning app.
+An isolated, opt-in GPT-Live connector supports a separate voice-model experiment.
 The voice runtime uses no Jev, Vercel AI Gateway, Twilio account or additional
 speech provider. A separate, opt-in synthetic Jev benchmark is described below.
 
@@ -186,8 +187,58 @@ npm run build
 npm start
 ```
 
-The health endpoint reports process health and telemetry mode, not a successful
-Azure model invocation. It never returns configuration values.
+### Explicit voice-model selection
+
+The existing `src/azure-realtime.ts` connector is unchanged. `VOICE_CONNECTOR`
+defaults to `realtime`; the experimental `live` path lives in `src/azure-live.ts`.
+There is no automatic fallback or model switching.
+
+After `/healthz` reports `activeCalls: 0`, stop **only the voice server** before
+running one of these commands. Keep the tunnel and Prosper integration unchanged;
+starting another command does not stop the old process or free port 7860.
+
+```sh
+npm run start:live           # GPT-Live 1 + the configured Responses backend
+npm run start:realtime-1.5   # Explicit return to the original Realtime 1.5 deployment
+npm run start:realtime-2     # Separate Realtime 2 experiment, when ready
+```
+
+The Realtime 2 preset changes the deployment, not the existing Realtime protocol.
+It is not activated or validated by testing Live; verify that deployment's
+compatibility separately before comparing calls.
+
+To persist the selected connector for ordinary `npm start`, use:
+
+```sh
+npm run configure -- --voice-connector live
+# Restore the default connector:
+npm run configure -- --voice-connector realtime
+```
+
+These switches preserve the endpoint token, tunnel, Realtime deployment, voice
+and gain. Live uses separate `AZURE_OPENAI_LIVE_DEPLOYMENT` (default `gpt-live-1`),
+`AZURE_OPENAI_LIVE_BACKEND_DEPLOYMENT` (default `gpt-5.4-mini`) and
+`AZURE_OPENAI_LIVE_VOICE` (default `coral`) settings. Both deployments must be
+available on the configured Azure resource. Live duration and Responses backend
+tokens incur separate Azure usage. `VOICE_LIVE_OUTPUT_GAIN_DB` defaults to 0;
+the existing `VOICE_OUTPUT_GAIN_DB` continues to apply only to Realtime.
+
+Live uses `/openai/v1/live/sessions` with native PCMU at 8 kHz, not the Realtime
+preview endpoint. Its delegated functions reuse the same call-local receptionist,
+clinic validation, authoritative call ID and confirmation/submission safeguards.
+Live captions are timestamped fragments, **not completed caller turns**. A fresh
+write additionally requires stable, explicit caller approval in a later Live
+delegation than the proposal. Text injection is read-only diagnostic input.
+Backend completion does not mean spoken playback finished; local audio gaps only
+flush the existing bounded playback queue and silence tail. Interruptions discard
+local queued audio and notify Live, without sending Realtime truncation events.
+This notification does not prove the provider or caller heard exactly the same
+audio, and fragment stability alone never establishes consent.
+
+The health endpoint reports process health, telemetry mode and the selected
+non-secret voice profile, not a successful Azure invocation. `voiceConnector`,
+`voiceDeployment`, `voiceOutputGainDb` and, for Live, `voiceBackendDeployment`
+identify what the running process will use. It never returns credentials.
 
 To receive calls from Prosper, expose the server through a TLS-enabled
 WebSocket ingress. Keep the default loopback bind for local development; set
@@ -333,6 +384,9 @@ Assistant text is labelled **generated audio**, not a guarantee that the caller
 heard all of it; use the interruption records when reviewing it. Speech
 recognition is also fallible. These files may contain patient details: keep them
 on the VM and do not upload them to GitHub, public dashboards or Azure Monitor.
+Live transcript fragments retain `partial:true` and their `startMs`/`endMs`
+session intervals. Preserve spaces and repeated words; neither fragment arrival
+nor a timestamp gap is an authoritative end-of-turn or playback acknowledgment.
 
 To find a call, use your editor or list the private directory on the VM:
 
@@ -394,8 +448,10 @@ npm run check:connections -- --voice
 ```
 
 The first connection check only reads the clinic. `--voice` additionally opens
-one Azure session, asks it to use `get_clinic`, checks that it returns non-silent
-mu-law audio, then closes it. It does not create a Prosper call or submit a result.
+the explicitly configured connector, asks it to use `get_clinic`, checks that it
+returns non-silent mu-law audio and completes its backend work, then closes it.
+It does not create a Prosper call or submit a result; its HTTP wrapper also
+blocks every POST even if a model attempts a write.
 Unit and local WebSocket tests use fakes and require no cloud credentials.
 
 Successful checks finish with `connection_check.completed`, separately reporting

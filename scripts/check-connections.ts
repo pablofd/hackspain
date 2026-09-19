@@ -11,9 +11,9 @@ async function main(): Promise<void> {
   const config = loadConfig();
   const telemetry = startTelemetry(config);
   try {
-    const [{ ProsperClient }, { createAzureVoiceFactory }] = await Promise.all([
+    const [{ ProsperClient }, { createConfiguredVoiceFactory, voiceProfile }] = await Promise.all([
       import("../src/prosper.js"),
-      import("../src/azure-realtime.js"),
+      import("../src/voice-provider.js"),
     ]);
     const clinic = await new ProsperClient(config).getClinic(ROOT_CONTEXT, AbortSignal.timeout(15_000));
     log("info", "prosper.access_verified", {
@@ -27,11 +27,16 @@ async function main(): Promise<void> {
         let audioBytes = 0;
         let audibleBytes = 0;
         let toolRequests = 0;
+        let backendCompleted = false;
+        const maybeComplete = () => {
+          if (backendCompleted && audioBytes > 0 && audibleBytes > 0 && toolRequests > 0) completion.resolve();
+        };
         const observedFetch: typeof fetch = async (input, init) => {
+          if (init?.method?.toUpperCase() === "POST") throw new AppError("voice_check_submissions_disabled");
           toolRequests += 1;
           return fetch(input, init);
         };
-        const factory = createAzureVoiceFactory(config, new ProsperClient(config, observedFetch));
+        const factory = createConfiguredVoiceFactory(config, new ProsperClient(config, observedFetch));
         const timeout = setTimeout(() => {
           completion.reject(new AppError("voice_check_timeout"));
           controller.abort();
@@ -42,16 +47,18 @@ async function main(): Promise<void> {
             parent: context.active(),
             signal: controller.signal,
             greet: false,
+            allowSubmissions: false,
             onAudio: ({ audio }) => {
               audioBytes += audio.length;
               audibleBytes += audio.reduce((count, sample) => count + (sample !== 0xff && sample !== 0x7f ? 1 : 0), 0);
+              maybeComplete();
             },
             onAudioDone: () => {},
             onInterrupt: () => undefined,
             onFailure: (error) => completion.reject(error),
             onTurnDone: () => {
-              if (audioBytes > 0 && audibleBytes > 0 && toolRequests > 0) completion.resolve();
-              else completion.reject(new AppError("voice_check_incomplete"));
+              backendCompleted = true;
+              maybeComplete();
             },
           }).then((voice) => {
             session = voice;
@@ -59,7 +66,7 @@ async function main(): Promise<void> {
           });
           await Promise.all([connecting, completion.promise]);
           log("info", "azure.voice_verified", {
-            model: config.AZURE_OPENAI_DEPLOYMENT, audioBytes, audibleBytes, toolRequests,
+            ...voiceProfile(config), audioBytes, audibleBytes, toolRequests,
           });
         } finally {
           clearTimeout(timeout);

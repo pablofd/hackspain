@@ -65,6 +65,7 @@ test("records lifecycle and all supported events as private append-only NDJSON",
     { type: "transcript", speaker: "user", itemId: "input-1", text: "synthetic input" },
     { type: "transcript", speaker: "assistant", itemId: "output-1", text: "synthetic output" },
     { type: "transcript", speaker: "assistant", itemId: "partial-output", text: "unfinished synthetic output", partial: true },
+    { type: "transcript", speaker: "user", itemId: "live-fragment", text: "synthetic fragment", partial: true, startMs: 100, endMs: 200 },
     { type: "interruption", itemId: "output-1", audioEndMs: 12.5 },
     { type: "interruption", itemId: "partial-output", audioEndMs: 0, reason: "output_limit" },
     { type: "interruption" },
@@ -94,12 +95,36 @@ test("records lifecycle and all supported events as private append-only NDJSON",
   assert.equal(data[0]?.timestamp, STARTED_AT.toISOString());
   assert.equal(data[0]?.assistantTranscriptSource, "generated_audio");
   assert.equal(data.find((row) => row.itemId === "partial-output" && row.type === "transcript")?.partial, true);
+  const liveFragment = data.find((row) => row.itemId === "live-fragment");
+  assert.equal(liveFragment?.startMs, 100);
+  assert.equal(liveFragment?.endMs, 200);
+  assert.equal(liveFragment?.partial, true);
   assert.equal(data.find((row) => row.itemId === "partial-output" && row.type === "interruption")?.reason, "output_limit");
   assert.equal(data.at(-1)?.inputBytes, FINISH.inputBytes);
   assert.equal(data.at(-1)?.outputBytes, FINISH.outputBytes);
   assert.equal(fs.statSync(directory).mode & 0o777, 0o700);
   assert.equal(fs.statSync(path).mode & 0o777, 0o600);
   assert.throws(() => recorder.append({ type: "error", code: "late" }), safeError("call_recording_closed"));
+});
+
+test("Live transcript timing requires a finite, nonnegative, ordered pair", (t) => {
+  const { options } = fixture(t);
+  const store = createCallRecordStore(options);
+  let index = 0;
+  for (const timing of [
+    { startMs: -1, endMs: 10 }, { startMs: 20, endMs: 10 },
+    { startMs: NaN, endMs: 10 }, { startMs: 0, endMs: Infinity },
+    { startMs: 0 }, { endMs: 10 },
+  ]) {
+    const recorder = store.start(`live-range-${++index}`, STARTED_AT);
+    assert.throws(() => recorder.append({
+      type: "transcript", speaker: "user", itemId: "fragment", text: "synthetic",
+      partial: true, ...timing,
+    }), safeError("call_recording_invalid_event"));
+  }
+  const recorder = store.start("live-range-valid", STARTED_AT);
+  recorder.append({ type: "transcript", speaker: "user", itemId: "valid", text: "yes", partial: true, startMs: 0, endMs: 0 });
+  recorder.finish(FINISH);
 });
 
 test("redacts raw newline/quote secrets in nested strings and keys before serialization", (t) => {
