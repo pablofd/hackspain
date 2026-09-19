@@ -113,6 +113,12 @@ The tool layer keeps state per call, separate from the language model:
 - `prepare_action` builds the action from a returned slot or an upcoming
   appointment. It cannot invent a provider, appointment type, minute or plan.
   It does **not** submit anything.
+- For a later move, `list_appointments` supplies an upcoming appointment's
+  `later_search`. Its opt-in `after_appointment_id` keeps the original doctor
+  and site by default, searches from the appointment's Madrid date and excludes
+  slots at or before its exact start. Explicit caller changes remain possible.
+  It supplies RESCHEDULE preparation, never an automatic BOOK; ordinary booking
+  searches and earlier moves are unchanged.
 - The agent reads the proposal aloud and waits for explicit caller confirmation.
   `confirm_action` is rejected in the proposal's own turn. New searches invalidate
   that request's unconfirmed booking proposals, not a different patient's or
@@ -121,6 +127,11 @@ The tool layer keeps state per call, separate from the language model:
   caller transcription and a brief stable-turn interval; an explicit condition
   or request to check an alternative blocks submission. The model still interprets
   consent: this is a rejection guard, not proof of consent from a classifier.
+  Revised offers should repeat only changed details when the rest was heard
+  and is still valid. After explicit approval of the current BOOK/RESCHEDULE
+  proposal, the next step is confirmation submission, not another explanation
+  or repeated preparation. This is conversational guidance, not an automatic
+  submission triggered by a transcript or disconnect.
 - Accepted actions cannot be edited or replaced. An identical retry is safe:
   Prosper returns 409 if it already accepted it. Unknown outcomes only retry the
   same payload; 410/422 are errors, never success. One confirmed POST already in

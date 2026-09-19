@@ -24,6 +24,7 @@ export { addDays, madridDate } from "./scheduling.js";
 const availabilityInput = z.strictObject({
   patient_id: idSchema,
   prepare_booking: z.literal(true).optional().describe("Only for this BOOK search: prepare the earliest eligible option if it has one eligible held policy, without submitting. Omit for rescheduling or read-only searches. Read back the proposal and obtain consent in a new caller turn."),
+  after_appointment_id: idSchema.optional().describe("Only for a LATER RESCHEDULE of an upcoming appointment returned by list_appointments for this patient. Defaults to its actual doctor/site and filters slots strictly after its start. Omit dates for the first later option; use this instead of an unanchored 'later' date_phrase. Never combine with prepare_booking. Reuse request_id for corrections."),
   request_id: idSchema.optional().describe("Reuse the request_id when correcting or relaxing the same request. Separate patient/intents have separate request_ids."),
   new_request: z.literal(true).optional().describe("Only for a separate additional appointment intent, not a correction or retry of an existing request."),
   specialty_id: idSchema.optional(),
@@ -102,8 +103,8 @@ const descriptions: Record<keyof typeof toolSchemas, string> = {
   collect_registration: "Start an explicitly requested new-patient registration immediately, even before collecting details. Save caller-provided demographics incrementally; returns only missing/invalid fields and the next short question group. No existing-patient verification is required. Corrections invalidate this registration's unsubmitted proposal. When ready, call prepare_action with registration_id BEFORE the final readback; a later explicit confirmation is still required.",
   resolve_request: "Resolve the caller's explicitly chosen provider/specialty; use routine symptom routing only when no specialty/provider was requested. Ask about ambiguous doctors; do not guess. Emergency red flags still override scheduling: a medical_emergency result requires immediate report_outcome ESCALATE, no booking. Patient age is calculated from their verified chart.",
   locate_origin: "Resolve only the caller's public street/place and town for nearest-site scheduling. If several candidates remain, ask the caller to select one, then repeat with candidate_id. Returns an origin_id for search_availability.",
-  search_availability: "Find real slots for a verified patient. For BOOK set prepare_booking:true to prepare the first eligible option when its held policy is unambiguous; booking_proposal is NOT submitted. Omit the flag for rescheduling or read-only searches. Omit dates for earliest from tomorrow; use date_phrase for spoken relative dates. Specify only caller constraints and keep request_id for corrections. nearest_origin_id selects the closest eligible site.",
-  list_appointments: "Read a verified patient's appointments. Only upcoming appointments can be changed. Use this before cancelling or moving an appointment.",
+  search_availability: "Find real slots for a verified patient. For BOOK set prepare_booking:true to prepare the first eligible option when its held policy is unambiguous; booking_proposal is NOT submitted. Omit the flag for rescheduling or read-only searches. Omit dates for earliest from tomorrow; use date_phrase for spoken relative dates. Specify only caller constraints and keep request_id for corrections. nearest_origin_id selects the closest eligible site. For a later RESCHEDULE use the selected appointment's later_search from list_appointments; after_appointment_id anchors the date, doctor and site to verified data. On the first search omit request_id; reuse the returned ID for corrections.",
+  list_appointments: "Read a verified patient's appointments before cancelling or moving one. Only upcoming appointments can be changed. Select the caller's intended appointment; its later_search supplies the exact patient/appointment IDs for a later RESCHEDULE, preserving the original doctor/site without asking again. Clarify only when the intended appointment or a requested change is ambiguous.",
   prepare_action: "Prepare (but DO NOT SEND) an action. request.action is BOOK, CANCEL, RESCHEDULE or REGISTER. Use returned slot_id for booking/moving. For REGISTER prefer the ready registration_id from collect_registration and follow readback_guidance; complete new_patient remains supported. Read the returned details and obtain explicit confirmation. An identical unconfirmed proposal in the same intent is reused; changed details require a new proposal and consent.",
   confirm_action: "Send a prepared action ONLY after the caller explicitly confirms its details in a NEW conversational turn. Never call in the same turn as prepare_action. Cannot undo a submission; do not say confirmed until status is accepted or duplicate.",
   confirm_actions: "Confirm multiple prepared actions after reading ALL their details and receiving explicit agreement in a new caller turn. Each action sends one POST; all proposals are checked before any POST. Use get_call_state after an uncertain/partial failure.",
@@ -143,6 +144,7 @@ interface Option {
   requestId: string;
   slot: Slot;
   plans: Set<Insurer>;
+  rescheduleAppointmentId?: string;
 }
 interface SchedulingRequest {
   id: string;
@@ -279,7 +281,18 @@ export class Receptionist {
                 this.appointments.set(appointment.appointment_id, appointment);
               }
             }
-            result = { appointments };
+            result = {
+              appointments: appointments.map((appointment) => {
+                const canModify = Date.parse(appointment.start_time) > this.call.startedAt.getTime();
+                return {
+                  ...appointment, can_modify: canModify,
+                  ...(canModify ? { later_search: {
+                    patient_id: appointment.patient_id, after_appointment_id: appointment.appointment_id,
+                  } } : {}),
+                };
+              }),
+              instruction: "Select the caller's intended upcoming appointment, not a historical ID. For a later move use its later_search and omit request_id on the first search. Its original doctor/site are already known; ask only about an actual ambiguity or a requested change. For cancellation, prepare CANCEL with that exact appointment_id and obtain confirmation.",
+            };
             break;
           }
           case "prepare_action":
@@ -331,6 +344,11 @@ export class Receptionist {
               requests: [...this.requests.values()].map((request) => ({
                 request_id: request.id, patient_id: request.patientId, specialty_id: request.specialtyId,
                 last_search: request.lastSearch,
+                ...(request.input.after_appointment_id ? {
+                  original_appointment: this.appointments.get(request.input.after_appointment_id),
+                  after_appointment_id: request.input.after_appointment_id,
+                  provider_id: request.input.provider_id ?? null, location_id: request.input.location_id ?? null,
+                } : {}),
                 ...(!request.lastSearch?.hasSlots ? { previous_options: this.previousOptions(request) } : {}),
               })),
               actions: [...this.proposals.values()].map((proposal) => ({
@@ -839,16 +857,47 @@ export class Receptionist {
     const clinic = await this.api.getClinic(this.call.parent, this.call.signal);
     this.current(turn);
     const explicit = input.request_id ? this.requests.get(input.request_id) : undefined;
-    if (input.request_id && (!explicit || explicit.patientId !== patient.patient_id)) throw new AppError("request_not_found");
+    if (input.request_id && (!explicit || explicit.patientId !== patient.patient_id)) {
+      throw new AppError("request_not_found",
+        "On the first search, omit request_id; only reuse a request_id returned for this patient's intent. For a later move, use the selected upcoming appointment's later_search from list_appointments. Do not invent IDs or ask the caller to provide them.");
+    }
+    if (explicit && input.after_appointment_id && explicit.input.after_appointment_id !== input.after_appointment_id) {
+      throw new AppError("reschedule_appointment_mismatch",
+        "This request belongs to another appointment or booking intent. Revise the old unconfirmed request, then start a fresh search without its request_id for the selected upcoming appointment.");
+    }
+    const afterAppointmentId = input.after_appointment_id ?? explicit?.input.after_appointment_id;
+    const original = afterAppointmentId ? this.appointments.get(afterAppointmentId) : undefined;
+    if (afterAppointmentId && (!original || original.patient_id !== patient.patient_id ||
+        Date.parse(original.start_time) <= this.call.startedAt.getTime())) {
+      throw new AppError("appointment_not_verified", "Read this verified patient's upcoming appointments and use the exact selected appointment_id for the later move.");
+    }
+    if (original && prepareBooking) {
+      throw new AppError("reschedule_not_booking", "This search moves an existing appointment. Omit prepare_booking; use the returned RESCHEDULE preparation, never BOOK.");
+    }
+    if (original && [...this.proposals.values()].some((proposal) =>
+      proposal.key === `appointment:${original.appointment_id}` && !["proposed", "failed"].includes(proposal.status))) {
+      throw new AppError("action_already_submitted",
+        "This appointment already has a submitted or uncertain action. Do not start another move or substitute a refusal; uncertain delivery may only retry the identical proposal.");
+    }
+    const originalProvider = original ? clinic.providers.find((provider) => provider.id === original.provider_id) : undefined;
+    const originalLocation = original ? clinic.locations.find((location) => location.id === original.location_id) : undefined;
+    if (original && (!originalProvider || !originalLocation)) {
+      throw new AppError("unknown_catalog_id", "The original appointment's doctor or site could not be matched to the clinic catalogue. Do not guess a replacement.");
+    }
+    if (original && input.date_phrase && /^(?:later|mas tarde|mes tard)[.!?]*$/.test(normalizeHumanText(input.date_phrase))) {
+      delete input.date_phrase;
+    }
     const suppliedSpecialty = input.specialty_id ??
-      clinic.providers.find((provider) => provider.id === input.provider_id)?.specialty_id;
+      clinic.providers.find((provider) => provider.id === input.provider_id)?.specialty_id ?? originalProvider?.specialty_id;
+    if (originalProvider && suppliedSpecialty !== originalProvider.specialty_id) throw new AppError("reschedule_specialty_mismatch");
     const previous = explicit ?? (!input.new_request && suppliedSpecialty
-      ? [...this.requests.values()].findLast((value) => value.patientId === patient.patient_id && value.specialtyId === suppliedSpecialty)
+      ? [...this.requests.values()].findLast((value) => value.patientId === patient.patient_id &&
+        value.specialtyId === suppliedSpecialty && value.input.after_appointment_id === afterAppointmentId)
       : undefined);
     const previousSearch = previous?.lastSearch;
     const advanceEmptyOpenDay = Boolean(input.allow_next_open_day && previousSearch &&
       !previousSearch.closed && !previousSearch.hasSlots && previousSearch.dateFrom === previousSearch.dateTo &&
-      Object.keys(input).every((key) => ["patient_id", "request_id", "allow_next_open_day"].includes(key)));
+      Object.keys(input).every((key) => ["patient_id", "request_id", "after_appointment_id", "allow_next_open_day"].includes(key)));
     const advanceDay = input.advance_day || advanceEmptyOpenDay;
     if (input.advance_day && (input.date_from || input.date_to || input.date_phrase || input.weekday ||
         input.relax_constraints?.some((constraint) => constraint === "date" || constraint === "weekday"))) {
@@ -861,7 +910,14 @@ export class Receptionist {
       throw new AppError("calendar_exhausted", "There is no later bookable day in the clinic calendar. Do not claim to have searched beyond it; use the prior request's evidence if the caller declines other alternatives.");
     }
     if (previous) this.invalidateRequest(previous);
-    const merged = previous ? { ...previous.input, ...input } : { ...input };
+    const merged = previous ? { ...previous.input, ...input } : {
+      ...(original ? {
+        after_appointment_id: original.appointment_id, specialty_id: suppliedSpecialty,
+        provider_id: original.provider_id,
+        ...(!input.nearest_origin_id ? { location_id: original.location_id } : {}),
+      } : {}),
+      ...input,
+    };
     if (advanceDay && previousSearch) {
       delete merged.date_phrase;
       delete merged.weekday;
@@ -928,6 +984,14 @@ export class Receptionist {
     }
     this.heldPlans.set(patient.patient_id, plans);
     let dates = this.resolveDates(merged, clinic);
+    if (original) {
+      const originalDate = madridDate(new Date(original.start_time));
+      if (dates.dateTo < originalDate) {
+        throw new AppError("reschedule_window_before_appointment",
+          "This later-move window ends before the original appointment. Keep the caller's constraints and clarify the date. Only for an explicitly earlier move, revise this draft and start an ordinary RESCHEDULE search without after_appointment_id or the old request_id.");
+      }
+      if (dates.dateFrom < originalDate) dates = this.resolveDates({ ...merged, date_from: originalDate }, clinic);
+    }
     if (provider?.leave && !merged.wait_for_provider_return &&
         provider.leave.start <= madridDate(this.call.startedAt) && provider.leave.end >= dates.dateFrom) {
       dates = { ...dates, dateTo: dates.dateTo < provider.leave.end ? dates.dateTo : provider.leave.end };
@@ -938,7 +1002,8 @@ export class Receptionist {
     const combinedBlocked = new Map<string, { provider_id: string; restriction: OutcomeReason }>();
     let anyUnblockedProvider = false;
     for (const site of candidateSites) {
-      scan = await this.scanAvailability(merged, patient, plans, dates, turn, site.id);
+      scan = await this.scanAvailability(merged, patient, plans, dates, turn, site.id,
+        original ? Date.parse(original.start_time) : undefined);
       for (const rule of scan.blocked) combinedBlocked.set(`${rule.provider_id}:${rule.restriction}`, rule);
       anyUnblockedProvider ||= scan.hasUnblockedProvider;
       evaluatedSites.push({
@@ -957,7 +1022,10 @@ export class Receptionist {
     };
     const slots = scan.slots.slice(0, 12).map((slot) => {
       const slotId = `slot-${++this.sequence}`;
-      this.options.set(slotId, { patientId: patient.patient_id, requestId: request.id, slot, plans: new Set(plans) });
+      this.options.set(slotId, {
+        patientId: patient.patient_id, requestId: request.id, slot, plans: new Set(plans),
+        ...(original ? { rescheduleAppointmentId: original.appointment_id } : {}),
+      });
       return { ...slot, slot_id: slotId };
     });
     if (slots.length) {
@@ -1011,6 +1079,13 @@ export class Receptionist {
       slots, recommended_slot_id: firstSlot?.slot_id ?? null,
       blocked: scan.blocked, searched_from: dates.dateFrom, searched_to: scan.endSearched,
       booking_proposal: bookingProposal, submitted: false, pricing_status: "not_supplied",
+      ...(original && originalProvider && originalLocation ? { reschedule: {
+        original_appointment: original,
+        original_provider_name: originalProvider.name, original_location_name: originalLocation.name,
+        prepare_action: firstSlot && policy ? { request: {
+          action: "RESCHEDULE", appointment_id: original.appointment_id, slot_id: firstSlot.slot_id, policy_id: policy,
+        } } : null,
+      } } : {}),
       ...(dates.adjustedFrom ? { adjusted_from_closed_date: dates.adjustedFrom } : {}),
       ...(merged.nearest_origin_id ? { evaluated_sites: evaluatedSites } : {}),
       no_booking: slots.length ? null : {
@@ -1030,8 +1105,10 @@ export class Receptionist {
         } : {}),
       },
       instruction: slots.length
-        ? bookingProposal
-          ? "booking_proposal is already prepared, NOT submitted, for its paired slot_id and policy. If these match the final request, read its exact details and wait for a NEW caller turn explicitly agreeing, then confirm_action with its proposal_id. Do not prepare that same offer again. For another slot or policy, use prepare_action before its readback; corrections require revise_request and a new search. Do not treat questions or unrelated agreement as consent."
+        ? original
+          ? "These are later RESCHEDULE options for reschedule.original_appointment, never BOOK. Use reschedule.prepare_action when present and matching the final request; otherwise select the caller's slot/eligible held policy and prepare RESCHEDULE with this exact appointment_id. Prepare before one concise readback, then wait for a NEW confirming caller turn. Keep the known doctor/site unless the caller changes them; do not ask for them again. After a correction use this request_id, search again and prepare the new offer before its readback."
+          : bookingProposal
+          ? "booking_proposal is already prepared, NOT submitted, for its paired slot_id and policy. If these match the final request, read one concise offer and wait for a NEW caller turn explicitly agreeing, then call confirm_action before any further explanation or question. Do not prepare that same offer again. For another slot or policy, prepare before its readback; corrections require revise_request and a new search. Do not treat agreement to check an alternative as booking consent."
           : "No BOOK proposal was prepared. Unless the caller requested specific alternatives, offer the single earliest matching recommended_slot_id, not an unsolicited menu of later times. Use prepare_action for the intended action and matching slot/eligible held policy BEFORE its readback. An explicitly chosen different time must still be honored. Multiple eligible held policies require explicit selection. Wait for a new confirming caller turn, then confirm_action."
         : [
           "No outcome has been submitted. Preserve the caller's specialty, site and time constraints.",
@@ -1119,7 +1196,7 @@ export class Receptionist {
 
   private async scanAvailability(
     input: z.infer<typeof availabilityInput>, patient: Patient, plans: Set<Insurer>,
-    dates: ReturnType<Receptionist["resolveDates"]>, turn: number, siteId?: string,
+    dates: ReturnType<Receptionist["resolveDates"]>, turn: number, siteId?: string, strictlyAfter?: number,
   ) {
     const found: Slot[] = [];
     let hasUnblockedProvider = false;
@@ -1151,6 +1228,7 @@ export class Receptionist {
         const hour = Number(madridHour.format(date));
         const day = madridWeekday.format(date).toLowerCase();
         if (localDate < first || localDate > last || localDate <= madridDate(this.call.startedAt) ||
+            (strictlyAfter !== undefined && date.getTime() <= strictlyAfter) ||
             clinic.calendar.closure_days.includes(localDate) ||
             (siteId && siteId !== slot.location_id) ||
             (input.provider_id && input.provider_id !== slot.provider_id) ||
@@ -1242,6 +1320,7 @@ export class Receptionist {
       patientId = option.patientId;
       requestId = option.requestId;
       if (input.action === "BOOK") {
+        if (option.rescheduleAppointmentId) throw new AppError("reschedule_not_booking", "This slot was searched to move an existing appointment. Prepare RESCHEDULE for its original appointment_id.");
         if (input.patient_id !== option.patientId) throw new AppError("patient_slot_mismatch");
         action = {
           action: "BOOK", patient_id: option.patientId, provider_id: slot.provider_id, location_id: slot.location_id,
@@ -1249,6 +1328,9 @@ export class Receptionist {
         };
         key = `book:${option.requestId}`;
       } else {
+        if (option.rescheduleAppointmentId && input.appointment_id !== option.rescheduleAppointmentId) {
+          throw new AppError("reschedule_appointment_mismatch", "Use the original upcoming appointment_id associated with this reschedule search.");
+        }
         const appointment = this.appointments.get(input.appointment_id);
         if (!appointment || appointment.patient_id !== option.patientId) throw new AppError("appointment_not_verified");
         const clinic = await this.api.getClinic(this.call.parent, this.call.signal);
@@ -1299,7 +1381,9 @@ export class Receptionist {
         ? "This identical unsubmitted proposal keeps its original preparation turn. Do not repeat a completed readback or request consent again if a later caller turn already explicitly approved these exact details; confirm the same proposal_id. Otherwise read the final details and wait for a new explicit agreement. Nothing is submitted yet."
         : action.action === "REGISTER"
           ? "Use readback_guidance for one concise initial summary. After a correction, repeat only changed or unclear fields and acknowledge the rest unchanged. Let a fragmented correction finish without restarting a field menu. Wait for a NEW caller turn explicitly approving the complete latest registration; a correction or 'the rest is correct' alone is not consent. Nothing is submitted yet."
-          : "Read the details to the caller, ask for confirmation, and wait. Only use confirm_action after a NEW caller turn explicitly agrees. Nothing is submitted yet.",
+          : action.action === "BOOK" || action.action === "RESCHEDULE"
+            ? "Read one concise offer and ask one confirmation question. For a revised offer, repeat only the changed details if the previous details were already heard and remain valid; otherwise read the complete final offer. Wait for a NEW caller turn explicitly agreeing, then call confirm_action before any further explanation or question. Do not prepare the same offer again after that agreement. Agreement to check an alternative, silence or hang-up is not consent. Nothing is submitted yet."
+            : "Read the details to the caller, ask for confirmation, and wait. Only use confirm_action after a NEW caller turn explicitly agrees. Nothing is submitted yet.",
     };
   }
 
@@ -1428,7 +1512,7 @@ export function receptionistInstructions(startedAt: Date, allowSubmissions: bool
     "On a noisy line or uncertain digits/names, ask for the unclear fragment or spelling instead of guessing. After a lookup fails, confirm the supplied fields rather than demanding every identifier. Do not repeat identifiers unnecessarily once verified.",
     "Use resolve_request for the explicit specialty/provider already stated by the caller. Their explicitly requested specialty outranks routine symptom routing: do not replace it with an injury-triage specialty. Route routine symptoms only when no specialty/provider was chosen. The bounded complaint router is NOT a universal gate; an unsupported complaint does not invalidate an explicit scheduling request. Emergency red flags still override scheduling. Use original catalogue names/titles; clarify ambiguous names.",
     "Ask which specialty or named doctor they need and any site/time constraints. If they want the earliest and give no window, omit dates in search_availability; it searches from tomorrow. Do not add a site or other preference they did not request.",
-    "Offer one earliest eligible matching slot first, including after a corrected date. Use recommended_slot_id or booking_proposal. Do not offer an unsolicited menu of later times; discuss alternatives only when requested or the first offer is rejected. Always honor a caller's explicit later-time choice rather than replacing it with an earlier time.",
+    "Offer one earliest eligible matching slot first, including after a corrected date. Use recommended_slot_id or booking_proposal. Do not offer an unsolicited menu of later times; discuss alternatives only when requested or the first offer is rejected. Always honor a caller's explicit later-time choice rather than replacing it with an earlier time. For a requested next option, preserve all other constraints and prepare that option before its concise readback; do not repeat identity or the catalogue. Repeat only changed details when earlier details were already heard and still apply, otherwise read the complete final offer.",
     "Do not look up or negotiate unrelated existing appointments as a prerequisite to a clearly separate new booking. Use list_appointments for a requested change/cancellation, an appointment-history question, or a genuinely ambiguous existing-appointment request.",
     "Never set a provider-language filter just because the caller speaks English, Spanish or Catalan. Only set language when the caller explicitly asks for a doctor speaking that language.",
     "Pass a colloquial date exactly in date_phrase so code resolves it from the call date in Madrid. When the requested day/site is closed, offer the returned nextOpenDate and only set allow_next_open_day after the caller agrees; preserve site and morning/afternoon.",
@@ -1442,11 +1526,13 @@ export function receptionistInstructions(startedAt: Date, allowSubmissions: bool
     "If the caller returns to a previously discussed appointment after checking an empty alternative, the last empty date is not their final request. Use previous_options from availability/get_call_state to recheck the selected date, match its exact start_time/type, prepare and reconfirm. Never submit no_availability for a different day after they selected a known offer.",
     "To book, move, cancel or register: obtain a prepared proposal, read back its returned human-readable details, ask whether that is correct, and WAIT for a new caller turn explicitly agreeing. Only then confirm_action. A change of mind means a new search/proposal and a new confirmation, NOT confirmation of the stale proposal.",
     "For a BOOK search, set prepare_booking:true on that invocation. Its booking_proposal, when returned, is already prepared for the paired slot and policy: read it back, then confirm its proposal_id after new explicit consent without calling prepare_action again. Omit the flag for rescheduling or read-only searches. If no booking_proposal is returned, or another slot/policy/action is chosen, call prepare_action BEFORE reading the final offer. If the caller corrects a constraint, use revise_request and a fresh search/proposal; never confirm the stale offer. On digressions, do not interpret unrelated agreement as consent.",
+    "After a completed, unqualified yes to the current BOOK or RESCHEDULE offer, call confirm_action as the NEXT step, before any further explanation, question or repeated preparation. Wait for accepted/duplicate before saying it is confirmed. A yes to checking another day or preference is not agreement to a new offer; changed proposals require a fresh readback and a NEW confirming caller turn. Never submit on silence, timeout or hang-up.",
     "Do not call prepare_action and confirm_action in the same turn; a proposal returned by search_availability also requires a NEW caller turn explicitly agreeing after its readback. Do not say booked, cancelled, moved or registered until confirm_action returns accepted or duplicate. Those mean received by the clinic API, not that a judging score is known.",
     "Listen to the WHOLE confirmation. 'Yes, but...', corrections and requests to check another time are not final consent. Clarify or revise first; never submit while an alternative request remains unresolved. A confirmation error means no new action was sent.",
     "Submitted actions accumulate and cannot be replaced. Submit exactly the COMPLETE requested list, once per action. For multiple actions, prepare each, read all their details, and use confirm_actions after one explicit agreement to all of them. Each action still has its own POST. Never end after doing only one of two intents.",
     "Use get_call_state to recover verified identities, pending proposals and accepted actions instead of asking the same questions or resubmitting. Do not submit extra NO_ACTION as a farewell after a successful request. A separately unbookable intent must use its own request_id.",
     "For existing appointments, call list_appointments first; act only on an upcoming appointment. Registration requires every demographic field and a valid DNI/NIE letter; it registers ONLY, never books without a real patient_id.",
+    "For a later move, select the actual upcoming appointment and use its later_search/after_appointment_id, not a guessed request_id or an unanchored 'later' date_phrase. The first search needs no request_id. Its doctor/site and lower time bound come from that appointment, not memory or today's date. Reuse the returned request_id after corrections, preserving the original doctor/site unless the caller explicitly changes them. Use reschedule.prepare_action before the readback; never set prepare_booking for a move. An explicitly earlier move uses a fresh ordinary RESCHEDULE search without the later-only anchor. If several appointments fit, clarify which one; do not re-ask a known site. Cancellation still uses the exact selected upcoming ID; two requested cancellations remain two actions.",
     "If a tool fails, use its error guidance, clarify or retry if appropriate. Never claim success on an error. Do not submit NO_ACTION to hide an infrastructure failure.",
     "EVERY final refusal requires a record. Speaking a refusal, apologizing or saying goodbye does NOT submit anything. search_availability.no_booking gives the tool and evidenced reasons. Complete report_outcome before your final explanation or goodbye; do not wait until hang-up.",
     "For an insurance refusal, ask once if the caller holds another plan. 'I only have this plan' answers only the policy question, not a pending request for another provider, site or time: call revise_request and search_availability for that alternative before any NO_ACTION. Search any second held plan first. Only when no acceptable or requested alternative remains, report_outcome with the actual restriction and no_other_policy:true after an explicit negative policy answer. No extra confirmation of a final refusal is required; a successful alternative must BOOK.",

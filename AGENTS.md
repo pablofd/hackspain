@@ -280,6 +280,14 @@ the grace period or extend the 180-second voice call.
   Every proposal is checked before starting the first POST; a later network
   failure can still leave a partial multi-action record because the API is not
   transactional. Never hide that failure or resend a different payload.
+- For a later RESCHEDULE, choose a verified upcoming appointment from
+  `list_appointments` and use its `later_search`/`after_appointment_id`.
+  The anchor supplies the actual doctor/site and excludes slots at or before
+  the original instant. Do not invent a first-search request ID or reinterpret
+  an unanchored "later" from today. Reuse the returned request ID after a
+  correction; preserve doctor/site unless the caller explicitly changes them.
+  These slots cannot prepare BOOK or move a different appointment. Earlier
+  moves remain ordinary RESCHEDULE searches without the later-only anchor.
 - For a BOOK search, `prepare_booking:true` can return an unsubmitted
   `booking_proposal` for the earliest slot with one eligible held plan. Read that
   exact proposal, then confirm after the caller's later agreement; do not prepare
@@ -443,6 +451,7 @@ problems or promote a synthetic evaluation to a Prosper judge result.
 
 | Problem/type | Observed failure and cause | Correction / regression / status |
 | --- | --- | --- |
+| `no_slot_free` / later-move closure (33/36 legacy run, 19 Sep) | Three final failures had no action receipt: two BOOK negotiation paths and one RESCHEDULE path. A direct agreement arrived around 175 s without confirm_action before the cap; another final offer arrived too late for a reply. The move used an invented request ID and unsupported relative dates, then re-asked known site information after a correction. Tool paths do not establish a private problem label or hidden expected answer. | Narrow change only: concise revised offers, confirmation dispatch before additional chatter, and opt-in later_search anchored to a verified upcoming appointment. Synthetic regressions preserve caller constraints, new consent after corrections, refusal evidence, normal BOOK, one/two cancellations with one grouped approval, and no new writes on hang-up. No model, audio, global confirmation/registration rules or 60s/28s limits changed. Validation is offline; no new judged or acoustic result is claimed. |
 | Realtime 2.1 / call budget (local cohort, 19 Sep 09:42-10:21 UTC) | Of 23 recorded calls, 12 reached the local 180-second limit; five of those already had an API receipt. All 23 had incoming and outgoing signal, and every time-limited call had audio activity near the deadline. Five registration calls yielded two receipts at 179.9/183.5 seconds and three without a final receipt. | Dialogue/WAV/trace review completed privately; no judge mapping or model-controlled comparison is available. Propose shorter registration/correction readbacks and a remaining-time budget without skipping consent or extending the call. No runtime fix deployed by this review. A confirmed POST finishing in the post-close grace window is not itself invalid. |
 | Clinic transport / slow responses (same local cohort) | Eleven requests expired at the client's approximately eight-second deadline: seven GET and four POST attempts. Two BOOK retries returned duplicate, proving prior receipt despite the lost/late acknowledgment; another action remained unknown. The original network exception was not retained, so server versus network/egress cause is not established. | Correlated UTC windows and call IDs remain only in private reports. The subsequent user-authorized trial raises requests and the total confirmed-submit budget to 60 seconds, capped at 28 seconds after close. Mock-clock regressions cover long successful waits, exact deadlines, immediate read cancellation, shared retry budgets, close/abort ordering and call isolation. No new judge result or other dialogue fix is claimed. |
 | Outcome classification after API errors (same local cohort) | Two ordinary booking requests were incorrectly mapped to NO_ACTION(out_of_scope) after availability errors. One was accepted and the other had uncertain delivery. Technical unavailability did not justify the business reason. | Confirmed dialogue/state defect, not a justified clinic refusal. Extend current-request evidence checks to prevent technical-error reason substitution; retain uncertainty and never replace an uncertain payload with another action. Correction and synthetic regression remain pending; no private patient values belong in fixtures. |
