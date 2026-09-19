@@ -8,6 +8,8 @@ export interface OutcomeReviewContext {
   hasPreviousOptions: boolean;
 }
 
+export const privacyRefusalGuidance = "Privacy-only requests for stored identifiers, patient lists, or another person's appointment existence, time or doctor require NO_ACTION out_of_scope, not caller_not_authorised. Reserve caller_not_authorised for a genuine booking, change, cancellation or registration that cannot be authorized. Do not ask for identifiers or promise later disclosure to unlock a privacy-only request. Legitimate third-party scheduling still follows normal patient verification.";
+
 const priceTopic = /\b(?:costs?|prices?|fees?|charges?|pay|payment|co[- ]?pay(?:ment)?s?|precio|coste|costo|cuesta|costar|costaria|costara|copago|tarifa|pagar|pagare|cobran|cobrar(?:an|ia|ian|ien)?|preu|costa|copagament)\b/;
 const priceQuestion = /^(?:how much|what|do i|does|will i|would i|is there|is that|cuanto|cual|hay|tengo que|quant|quin|quina|que|hi ha|cal)\b|\b(?:can|could|would)\s+you\s+(?:please\s+)?(?:tell|explain|confirm|quote)\b|\b(?:puedes|puede|podrias|podria)\s+(?:decirme|decir|explicar|confirmar)\b|\b(?:pots|podeu|podries)\s+(?:dir|explicar|confirmar)\b|^(?:i (?:need|want) to|i'd like to|i would like to)\s+(?:know|check|confirm|understand)\b|^(?:necesito|quiero|quisiera|vull|necessito|voldria)\s+(?:saber|comprobar|comprovar|confirmar)\b/;
 const beforeAgreement = /\b(?:before (?:i )?(?:agree|accept|confirm|book)|antes de (?:aceptar|confirmar|reservar)|abans (?:de |d')(?:acceptar|confirmar|reservar))\b/;
@@ -111,6 +113,41 @@ const clinicOutcomeReasons = new Set([
   "patient_not_found", "provider_not_found",
 ]);
 
+const disclosureRequest = /\b(?:tell|read|give|show|share|send|reveal|disclose|confirm|check|know|look up|find out|want|need|dime|decirme|decir|leer|darme|dame|mostrar|compartir|revel(?:ar|[aei]|[ae]s)|confirmar|comprobar|consultar|saber|quiero|necesito|digues|dir|llegir|donar|mostra|comprovar|vull|necessito)\b/;
+const directDisclosure = /\b(?:tell (?:me|us)|read|give (?:me|us)|show (?:me|us)|share|send (?:me|us)|reveal|disclose|what(?:'s| is)|dime|decirme|leer|leeme|darme|dame|mostrar|compartir|revel(?:ar|[aei]|[ae]s)|cual es|digues|dir|llegir|donar|mostra|quin es)\b|\b(?:want|need|like)\s+to\s+(?:know|see|get)\b|\b(?:quiero|necesito|vull|necessito)\s+(?:saber|ver|veure)\b/;
+const negatedDisclosure = /\b(?:don't|do not|not asking (?:you )?to)\s+(?:tell|read|give|show|share|send|reveal|disclose)\b|\b(?:don't|do not)\s+(?:want|need)\b|\bnot asking for\b|\bno\s+(?:quiero|necesito|vull|necessito|me digas|me des|muestres|compartas|em diguis|em donis)\b/;
+const otherPerson = /\b(?:he|she|his|her|their|another patient|another person|someone else|neighbou?r|colleague|friend|father|mother|wife|husband|daughter|son|ella|su|sus|otra persona|otro paciente|vecin[oa]|companera|companero|amig[oa]|madre|padre|hij[oa]|ell|seu|seva|seus|seves|altra persona|altre pacient|veina?|company[as]?|mare|pare|fill[as]?)\b/;
+const protectedIdentifiers = /\b(?:dni|nie|national id|id number|identity number|phone(?: number)?|contact details|date of birth|birth date|telefono|numero de identidad|datos de contacto|fecha de nacimiento|telefon|dades de contacte|data de naixement)\b/;
+const storedInformation = /\b(?:on file|stored|you have|you've got|record|records|chart|database|tienes|teneis|ficha|archivo|historial|registrado|registrada|guardado|guardada|teniu|fitxa|arxiu|registrat|registrada|desat|desada)\b/;
+const suppliedHere = /\b(?:i (?:just )?(?:gave|told|provided)|i have (?:just )?(?:given|told|provided)|i've (?:just )?(?:given|told|provided)|acabo de (?:dar|decir|dictar)|te (?:he dado|he dicho|acabo de dar)|acabo de (?:donar|dir|dictar)|t'he (?:donat|dit))\b/;
+const privateRecords = /\b(?:medical records?|private (?:chart|records?)|historial (?:clinico|medico|privado)|historia clinica|historial (?:clinic|medic|privat))\b/;
+const patientList = /\b(?:patient (?:list|names?|roster)|list of patients|booked[- ]in list|lista de pacientes|listado de pacientes|nombres de los pacientes|llista de pacients|noms dels pacients)\b/;
+const existingAppointment = /\b(?:appointments?|visits?|next due|due in|booked in|seeing|down to see|citas?|visitas?|cites?|visites?|metge assignat|medico asignado)\b/;
+const publicAvailability = /\b(?:available|availability|opening hours|disponible|disponibilidad|horario de apertura|disponibles|disponibilitat|horari d'obertura)\b/;
+const clinicOperation = /\b(?:book|booking|reserve|reschedule|rescheduling|cancel|cancelling|canceling|register|registration|reservar|reserva|agendar|reprogramar|cancelar|anular|registrarme|registrar(?:-me)?|cancel·lar|cancellar|anullar|donar-me d'alta|darme de alta)\b|\b(?:make|arrange|move|change)\s+(?:a|an|the|my|his|her|their|this|that)(?:\s+(?:new|existing|next))?\s+(?:appointment|visit)\b|\b(?:cambiar|mover|pedir|solicitar|canviar|moure|demanar)\b[^.!?;]{0,50}\b(?:cita|hora|visita)\b/;
+
+function hasClinicOperation(text: string): boolean {
+  return normalizeTranscript(text).split(/[.!?;,\n]+|\b(?:but|pero|en canvi)\b/)
+    .some((clause) => clinicOperation.test(clause) && !negatedRequest.test(clause) &&
+      !/\b(?:not looking|not asking|no quiero|no vull)\b/.test(clause));
+}
+
+/** Rejects explicit disclosure requests; it never grants access or classifies every caller intent. */
+export function hasPrivacyDisclosureRequest(text: string, hasClinicalRequest = false): boolean {
+  const normalized = normalizeTranscript(text);
+  const clauses = normalized.split(/[.!?;,\n]+|\b(?:but|pero|en canvi)\b/)
+    .filter((clause) => !negatedDisclosure.test(clause));
+  const requested = clauses.filter((clause) => disclosureRequest.test(clause));
+  if (!requested.length) return false;
+  if (requested.some((clause) => privateRecords.test(clause) || patientList.test(clause))) return true;
+  if (requested.some((clause) => protectedIdentifiers.test(clause) && !suppliedHere.test(clause) &&
+      (storedInformation.test(clause) &&
+        (directDisclosure.test(clause) || /\b(?:check|confirm|comprobar|confirmar|consultar|comprovar)\b/.test(clause)) ||
+      otherPerson.test(clause) && directDisclosure.test(clause)))) return true;
+  return !hasClinicalRequest && !hasClinicOperation(normalized) && !publicAvailability.test(normalized) &&
+    otherPerson.test(clauses.join(" ")) && existingAppointment.test(clauses.join(" "));
+}
+
 /** Recognizes unresolved requests, never consent or the reason for a refusal. */
 export function hasUnresolvedOutcomeRequest(text: string): boolean {
   const normalized = normalizeTranscript(text)
@@ -162,6 +199,21 @@ export class ConfirmationGate {
     if (reason === "medical_emergency") return;
     const checkVoluntaryDeferral = reason === "caller_not_authorised";
     const checkScopeDeferral = reason === "out_of_scope" && context?.hasClinicalRequest === true;
+    if (checkVoluntaryDeferral) {
+      await this.reviewTranscript(turn, {
+        pendingCode: "outcome_transcript_pending",
+        pendingMessage: "The current caller turn has not been fully transcribed yet. Nothing was submitted. Wait for that turn; do not ask for an extra refusal confirmation.",
+        reject: () => {
+          const recent = [...this.transcripts].filter(([seen]) => seen <= turn && seen >= turn - 2)
+            .sort(([left], [right]) => left - right).map(([, value]) => value.text);
+          const lastOperation = recent.findLastIndex(hasClinicOperation);
+          return hasPrivacyDisclosureRequest(recent.slice(Math.max(0, lastOperation)).join("\n"),
+            context?.hasClinicalRequest);
+        },
+        rejectionCode: "privacy_outcome_requires_out_of_scope",
+        rejectionMessage: `${privacyRefusalGuidance} Nothing was submitted. Use report_outcome NO_ACTION out_of_scope for this disclosure request, without another lookup or confirmation.`,
+      });
+    }
     await this.reviewTranscript(turn, {
       pendingCode: "outcome_transcript_pending",
       pendingMessage: "The current caller turn has not been fully transcribed yet. Nothing was submitted. Wait for that turn; do not ask for an extra refusal confirmation.",

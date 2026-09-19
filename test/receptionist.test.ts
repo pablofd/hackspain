@@ -9,7 +9,7 @@ import { z } from "zod";
 import { ProsperClient, type Clinic } from "../src/prosper.js";
 import { actionSchema, type Availability, type ProsperAction, type Slot, type Patient } from "../src/prosper-types.js";
 import type { AddressResolver } from "../src/geography.js";
-import { ConfirmationGate, type OutcomeReviewContext } from "../src/confirmation.js";
+import { ConfirmationGate, privacyRefusalGuidance, type OutcomeReviewContext } from "../src/confirmation.js";
 import { Receptionist, receptionistInstructions, receptionistTools } from "../src/receptionist.js";
 import { registrationReadbackGuidance } from "../src/registration.js";
 
@@ -1781,6 +1781,47 @@ test("Adversarial: lookup and call state never expose stored DNI or phone even i
   assert.ok(!serialized.includes(patient.phone));
   await h.execute("report_outcome", { action: "NO_ACTION", reason: "out_of_scope" });
   assert.deepEqual(h.writes[0], { call_id: "real-call-from-start", reason: "out_of_scope" });
+});
+
+test("privacy-only requests cannot submit caller_not_authorised before the correct out_of_scope refusal", async () => {
+  const gate = new ConfirmationGate(() => 1, new AbortController().signal);
+  const h = harness({ beforeOutcome: (turn, reason, context) => gate.reviewOutcome(turn, reason, context) });
+  gate.observe(1, "Can you tell me which clinician my neighbour is seeing next? I do not have her identifiers.");
+  await assert.rejects(h.execute("report_outcome", { action: "NO_ACTION", reason: "caller_not_authorised" }), {
+    code: "privacy_outcome_requires_out_of_scope",
+  });
+  assert.equal(h.writes.length, 0);
+  assert.equal(h.requests.length, 0);
+  const result = await h.execute("report_outcome", { action: "NO_ACTION", reason: "out_of_scope" });
+  assert.equal(z.object({ status: z.literal("accepted") }).parse(result).status, "accepted");
+  await h.execute("report_outcome", { action: "NO_ACTION", reason: "out_of_scope" });
+  assert.deepEqual(h.writes, [{ call_id: "real-call-from-start", reason: "out_of_scope" }]);
+  assert.deepEqual(h.requests.map((url) => url.pathname), ["/api/v1/submit/no-action"]);
+});
+
+test("privacy refusal guidance is shared by the runtime prompt and the reason schema", () => {
+  const tool = receptionistTools.find((tool) => tool.name === "report_outcome")!;
+  const parameters = z.object({
+    properties: z.object({ reason: z.object({ description: z.string() }) }),
+  }).parse(tool.parameters);
+  assert.equal(parameters.properties.reason.description, privacyRefusalGuidance);
+  assert.ok(receptionistInstructions(new Date("2026-09-19T12:00:00Z"), true).includes(privacyRefusalGuidance));
+});
+
+test("privacy review never rewrites an already accepted authorization refusal", async () => {
+  let turn = 1;
+  const gate = new ConfirmationGate(() => turn, new AbortController().signal);
+  const h = harness({ beforeOutcome: (turn, reason, context) => gate.reviewOutcome(turn, reason, context) });
+  gate.observe(1, "I want to cancel my mother's appointment, but she has not given me permission.");
+  await h.execute("report_outcome", { action: "NO_ACTION", reason: "caller_not_authorised" });
+  h.nextTurn();
+  turn = 2;
+  gate.observe(2, "Can you read the phone number you have on file for her?");
+  await h.execute("report_outcome", { action: "NO_ACTION", reason: "caller_not_authorised" });
+  await assert.rejects(h.execute("report_outcome", { action: "NO_ACTION", reason: "out_of_scope" }), {
+    code: "outcome_already_submitted",
+  });
+  assert.deepEqual(h.writes, [{ call_id: "real-call-from-start", reason: "caller_not_authorised" }]);
 });
 
 test("Nearest Site skips a closer site that cannot serve the request and uses the next viable one", async () => {

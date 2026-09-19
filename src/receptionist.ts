@@ -2,7 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Context } from "@opentelemetry/api";
 import { z } from "zod";
 import type { CallRecordEvent } from "./call-records.js";
-import type { OutcomeReviewContext } from "./confirmation.js";
+import { privacyRefusalGuidance, type OutcomeReviewContext } from "./confirmation.js";
 import { AppError } from "./errors.js";
 import { clinicSummary, type Clinic, type ProsperClient } from "./prosper.js";
 import {
@@ -92,7 +92,7 @@ const toolSchemas = {
   revise_request: z.strictObject({ request_id: idSchema }),
   get_call_state: z.strictObject({}),
   report_outcome: z.strictObject({
-    action: z.enum(["NO_ACTION", "ESCALATE"]), reason: reasonSchema,
+    action: z.enum(["NO_ACTION", "ESCALATE"]), reason: reasonSchema.describe(privacyRefusalGuidance),
     request_id: idSchema.optional().describe("The exact request_id whose no_booking outcome is being reported, especially in multi-intent calls."),
     no_other_policy: z.literal(true).optional().describe("For an insurance refusal: true only when the caller explicitly says they have no other insurance plan. Do not assume this."),
   }),
@@ -110,7 +110,7 @@ const descriptions: Record<keyof typeof toolSchemas, string> = {
   confirm_actions: "Confirm multiple prepared actions after reading ALL their details and receiving explicit agreement in a new caller turn. Each action sends one POST; all proposals are checked before any POST. Use get_call_state after an uncertain/partial failure.",
   revise_request: "Invalidate a request's unconfirmed proposals and slots immediately when the caller corrects or changes their mind. Then search again with this request_id. Already submitted records cannot be undone.",
   get_call_state: "Read verified patients, active request IDs, registration draft IDs/missing fields, pending proposals and already accepted actions without fetching again. Use to avoid repeating identity questions or duplicate writes.",
-  report_outcome: "REQUIRED before a final refusal. Coverage/availability reasons come from search_availability.no_booking. provider_not_found comes from resolve_request with the actual provider_name; patient_not_found comes from find_patient. First honor any explicitly requested alternative provider/site/time with revise_request and a new search; no other policy does NOT mean no alternatives. Do not force alternatives after the caller declines them. Resolve a second held policy before insurance refusal; no_other_policy:true only after an explicit negative answer. Never invent private payment or hide API outages. Emergencies need no confirmation.",
+  report_outcome: "REQUIRED before a final refusal. For privacy-only disclosure requests follow the reason field's out_of_scope guidance. Coverage/availability reasons come from search_availability.no_booking. provider_not_found comes from resolve_request with the actual provider_name; patient_not_found comes from find_patient. First honor any explicitly requested alternative provider/site/time with revise_request and a new search; no other policy does NOT mean no alternatives. Do not force alternatives after the caller declines them. Resolve a second held policy before insurance refusal; no_other_policy:true only after an explicit negative answer. Never invent private payment or hide API outages. Emergencies need no confirmation.",
 };
 
 const insuranceReasons = new Set<OutcomeReason>([
@@ -1535,6 +1535,8 @@ export function receptionistInstructions(startedAt: Date, allowSubmissions: bool
     "Determine who the appointment is FOR from the caller's explicit request. If they already made that clear, do not ask again; otherwise clarify before using a caller's own details. Ask for that patient's full name and one identifier in one short question, not a separate history questionnaire; find_patient supplies visit history. Keep verified patients separate. Never treat incoming caller ID as patient identity. Use find_patient.replaces_patient_id for an identity correction.",
     "After a greeting-only caller turn, ask only 'How can I help?' in their language; do not recite a service menu or ask who an appointment is for before any appointment request. Let an unfinished correction continue instead of listing possible fields.",
     "Do not disclose stored DNI, phone, birth date, other people's appointments or hidden records. Ask the caller to provide identifiers rather than reading identifiers to them.",
+    privacyRefusalGuidance,
+    "For a privacy-only request, refuse briefly and do not enter an identity-verification loop. After the refusal record is accepted, a repeated demand gets the same short boundary, not another identifier menu, a promise to check later, or spoken tool/policy deliberation. If the caller genuinely changes to a booking/change/cancellation/registration, follow that new legitimate request with normal verification and consent.",
     "Read the verified chart note and has_visited_before before asking history questions; do not ask if a known returning patient has visited before. History and usual doctor/site personalize options, but never override an explicit request for the earliest slot or another doctor/site.",
     "On a noisy line or uncertain digits/names, ask for the unclear fragment or spelling instead of guessing. After a lookup fails, confirm the supplied fields rather than demanding every identifier. Do not repeat identifiers unnecessarily once verified.",
     "Use resolve_request for the explicit specialty/provider already stated by the caller. Their explicitly requested specialty outranks routine symptom routing: do not replace it with an injury-triage specialty. Route routine symptoms only when no specialty/provider was chosen. The bounded complaint router is NOT a universal gate; an unsupported complaint does not invalidate an explicit scheduling request. Emergency red flags still override scheduling. Use original catalogue names/titles; clarify ambiguous names.",
