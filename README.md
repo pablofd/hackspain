@@ -110,6 +110,11 @@ The tool layer keeps state per call, separate from the language model:
   weekday, morning/afternoon and explicitly requested language. It never offers
   same-day slots. A second insurance plan is used only when explicitly supplied
   from the caller's statement.
+  An empty eligible calendar is labelled as an empty **requested window**, not
+  an insurance exclusion. `next_window_search` is a ready query for a broader
+  later window only after caller approval; it retains the other constraints.
+  Relaxation flags remove old constraints but never erase explicitly supplied
+  replacements, such as a newly agreed site, date or afternoon-only requirement.
 - `prepare_action` builds the action from a returned slot or an upcoming
   appointment. It cannot invent a provider, appointment type, minute or plan.
   It does **not** submit anything.
@@ -152,6 +157,9 @@ The tool layer keeps state per call, separate from the language model:
   held plan; `no_other_policy:true` records their explicit negative answer before
   refusing. An accepted alternative clears old refusal evidence. Private payment
   is never suggested as a coverage workaround.
+  Calendar-only refusals do not need an insurance detour or booking-style extra
+  confirmation: after alternatives are declined or none remain, report the
+  current request's `no_availability` before closing.
 
 ## Documented problem workflows
 

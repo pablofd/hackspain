@@ -43,7 +43,7 @@ const availabilityInput = z.strictObject({
   advance_day: z.literal(true).optional().describe("After an exact-day search returned no slots and the caller agrees to the following day, reuse its request_id and set true. Preserves site/time and advances from the previously searched day, not from today."),
   nearest_origin_id: idSchema.optional().describe("An origin_id previously returned by locate_origin; do not invent coordinates or a site."),
   relax_constraints: z.array(z.enum(["provider", "location", "date", "weekday", "time", "language"])).optional()
-    .describe("Only constraints the caller explicitly agreed to relax when requesting an alternative. Omitted constraints otherwise remain unchanged when reusing request_id."),
+    .describe("Only old constraints the caller explicitly agreed to relax for an alternative. An explicitly supplied replacement value still applies; without a replacement, the named old constraint is removed. Other constraints remain unchanged when reusing request_id."),
 });
 const prepareInput = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("BOOK"), patient_id: idSchema, slot_id: idSchema, policy_id: insurerSchema }),
@@ -937,13 +937,21 @@ export class Receptionist {
       if (!input.time_of_day && phrase.timeOfDay !== "any") delete merged.time_of_day;
     }
     else if (input.date_from || input.date_to) delete merged.date_phrase;
+    // Relax old constraints, never erase a caller-approved replacement.
     for (const field of input.relax_constraints ?? []) {
-      if (field === "provider") delete merged.provider_id;
-      if (field === "location") { delete merged.location_id; delete merged.nearest_origin_id; }
-      if (field === "date") { delete merged.date_from; delete merged.date_to; delete merged.date_phrase; }
-      if (field === "weekday") delete merged.weekday;
-      if (field === "time") delete merged.time_of_day;
-      if (field === "language") delete merged.language;
+      if (field === "provider" && input.provider_id === undefined) delete merged.provider_id;
+      if (field === "location") {
+        if (input.location_id === undefined) delete merged.location_id;
+        if (input.nearest_origin_id === undefined) delete merged.nearest_origin_id;
+      }
+      if (field === "date") {
+        if (input.date_from === undefined) delete merged.date_from;
+        if (input.date_to === undefined) delete merged.date_to;
+        if (input.date_phrase === undefined) delete merged.date_phrase;
+      }
+      if (field === "weekday" && input.weekday === undefined) delete merged.weekday;
+      if (field === "time" && input.time_of_day === undefined) delete merged.time_of_day;
+      if (field === "language" && input.language === undefined) delete merged.language;
     }
     delete merged.relax_constraints;
     const provider = merged.provider_id ? clinic.providers.find((p) => p.id === merged.provider_id) : undefined;
@@ -1074,6 +1082,8 @@ export class Receptionist {
       }, turn),
       slot_id: firstSlot.slot_id, submitted: false,
     } : null;
+    const emptyCalendarWindow = !original && !slots.length && !scan.blocked.length && !dates.closed &&
+      scan.endSearched === dates.dateTo && request.reasons.size === 1 && request.reasons.has("no_availability");
     return {
       request_id: request.id, patient_id: patient.patient_id,
       slots, recommended_slot_id: firstSlot?.slot_id ?? null,
@@ -1093,6 +1103,16 @@ export class Receptionist {
         reason_candidates: [...request.reasons],
         ask_other_policy: request.needsOtherPolicyAnswer, submitted: false,
         previous_options: this.previousOptions(request),
+        ...(emptyCalendarWindow ? {
+          calendar_status: "no_slots_in_requested_window",
+          ...(dates.dateTo < clinic.calendar.ends ? {
+            next_window_search: {
+              patient_id: patient.patient_id, request_id: request.id,
+              date_from: addDays(dates.dateTo, 1), date_to: clinic.calendar.ends,
+              ...(prepareBooking ? { prepare_booking: true } : {}),
+            },
+          } : {}),
+        } : {}),
         ...(dates.closed ? { closed_date: dates.closed } : {}),
         ...(merged.provider_id ? { alternative_providers_same_specialty_and_site: alternatives } : {}),
         ...(ageRedirect.length ? { age_appropriate_specialty_alternatives: ageRedirect } : {}),
@@ -1110,6 +1130,13 @@ export class Receptionist {
           : bookingProposal
           ? "booking_proposal is already prepared, NOT submitted, for its paired slot_id and policy. If these match the final request, read one concise offer and wait for a NEW caller turn explicitly agreeing, then call confirm_action before any further explanation or question. Do not prepare that same offer again. For another slot or policy, prepare before its readback; corrections require revise_request and a new search. Do not treat agreement to check an alternative as booking consent."
           : "No BOOK proposal was prepared. Unless the caller requested specific alternatives, offer the single earliest matching recommended_slot_id, not an unsolicited menu of later times. Use prepare_action for the intended action and matching slot/eligible held policy BEFORE its readback. An explicitly chosen different time must still be honored. Multiple eligible held policies require explicit selection. Wait for a new confirming caller turn, then confirm_action."
+        : emptyCalendarWindow ? [
+          "No outcome has been submitted. This is an empty requested window, not an insurance exclusion or proof that every date/site is full.",
+          "Keep the caller's constraints. Ask one short question about a relevant change only if they have not already approved or declined it; never treat mornings or another site as satisfying an afternoon-only or fixed-site request.",
+          "Only after permission, use next_window_search for a broader later window or next_day_search for just the following day. Reuse request_id and preserve other constraints; do not repeat an unchanged empty search or ask about another policy.",
+          "previous_options remain historical: recheck a caller-selected option, prepare it and obtain fresh confirmation; never revive its old proposal.",
+          "If no acceptable requested alternative remains, report_outcome with this request_id and no_availability before the final refusal. Do not add a booking-style confirmation question.",
+        ].join(" ")
         : [
           "No outcome has been submitted. Preserve the caller's specialty, site and time constraints.",
           "This empty result applies only to searched_from/searched_to. previous_options are historical, not current proposals: if the caller selects one, use its recheck date/filter arguments, prepare the exact matching provider/site/start_time/type from fresh results, and reconfirm. Do not reuse an old proposal ID or report no_availability for a different selected day.",

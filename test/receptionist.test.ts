@@ -1360,6 +1360,180 @@ test("No Slot Free preserves site/time constraints when searching an agreed late
   assert.equal(alternative.slots.length, 1);
 });
 
+test("No Slot Free keeps explicit replacement constraints when the caller also relaxes the old ones", async () => {
+  const replacement = {
+    ...slot, provider_id: "PRALTERNATIVE", provider_name: "Alternative Doctor", location_id: "alternative",
+    start_time: "2026-10-05T15:00:00+02:00",
+  };
+  const providers = [
+    { ...clinic.providers[0]!, languages: ["en"] },
+    { ...clinic.providers[0]!, id: replacement.provider_id, name: replacement.provider_name, languages: ["ca"],
+      schedules: [{ location_id: "alternative", location_name: "Alternative", days: [
+        { weekday: "monday", intervals: ["09:00-18:00"] },
+      ] }] },
+  ];
+  const h = harness({
+    clinic: {
+      ...clinic, providers,
+      locations: [...clinic.locations, { ...clinic.locations[0]!, id: "alternative", name: "Alternative" }],
+    },
+    availability: (query) => ({
+      ...offered(query.searchParams.get("date_from") === "2026-10-03" ? [] : [
+        slot,
+        { ...replacement, start_time: "2026-10-05T09:30:00+02:00" },
+        { ...replacement, provider_id: slot.provider_id, location_id: slot.location_id,
+          start_time: "2026-10-05T14:00:00+02:00" },
+        replacement,
+      ]),
+      providers,
+    }),
+  });
+  await identify(h);
+  const empty = await searchBooking(h, {
+    provider_id: slot.provider_id, location_id: slot.location_id,
+    date_from: "2026-10-03", date_to: "2026-10-03",
+    time_of_day: "morning", weekday: "saturday", language: "en",
+  });
+  assert.equal(empty.slots.length, 0);
+  h.nextTurn();
+  const changed = await searchBooking(h, {
+    request_id: empty.request_id,
+    provider_id: replacement.provider_id, location_id: replacement.location_id,
+    date_from: "2026-10-05", date_to: "2026-10-05",
+    time_of_day: "afternoon", weekday: "monday", language: "ca",
+    relax_constraints: ["provider", "location", "date", "time", "weekday", "language"],
+  });
+  const query = h.requests.findLast((url) => url.pathname.endsWith("/availability"));
+  assert.equal(query?.searchParams.get("provider_id"), replacement.provider_id);
+  assert.equal(query?.searchParams.get("location_id"), replacement.location_id);
+  assert.equal(query?.searchParams.get("date_from"), "2026-10-05");
+  assert.equal(query?.searchParams.get("date_to"), "2026-10-05");
+  assert.deepEqual(changed.slots.map((value) => value.start_time), [replacement.start_time]);
+  assert.ok(changed.booking_proposal);
+  assert.equal(h.writes.length, 0);
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: changed.booking_proposal.proposal_id, confirmed: true,
+  }), { code: "confirmation_requires_new_turn" });
+  h.nextTurn();
+  await h.execute("confirm_action", { proposal_id: changed.booking_proposal.proposal_id, confirmed: true });
+  assert.deepEqual(h.writes, [{
+    call_id: "real-call-from-start", patient_id: patient.patient_id, provider_id: replacement.provider_id,
+    location_id: replacement.location_id, appointment_type_id: replacement.appointment_type_id,
+    slot: replacement.start_time, policy_id: patient.insurer,
+  }]);
+});
+
+test("No Slot Free honors a replacement date phrase but can remove an old date when no replacement is supplied", async () => {
+  const alternative = { ...slot, start_time: "2026-10-05T11:00:00+02:00" };
+  for (const datePhrase of [undefined, "Monday October 5, 2026"]) {
+    const h = harness({ slots: [slot, alternative] });
+    await identify(h);
+    const empty = await searchBooking(h, {
+      provider_id: slot.provider_id, location_id: slot.location_id,
+      date_from: "2026-10-03", date_to: "2026-10-03", time_of_day: "morning",
+    });
+    assert.equal(empty.slots.length, 0);
+    h.nextTurn();
+    const changed = await searchBooking(h, {
+      request_id: empty.request_id, relax_constraints: ["date"],
+      ...(datePhrase ? { date_phrase: datePhrase } : {}),
+    });
+    assert.equal(changed.slots[0]?.start_time, datePhrase ? alternative.start_time : slot.start_time);
+    const query = h.requests.findLast((url) => url.pathname.endsWith("/availability"));
+    assert.equal(query?.searchParams.get("provider_id"), slot.provider_id);
+    assert.equal(query?.searchParams.get("location_id"), slot.location_id);
+    assert.equal(h.writes.length, 0);
+  }
+});
+
+test("No Slot Free supplies a caller-approved broader-window search without dropping site, day, time or language", async () => {
+  const alternative = { ...slot, start_time: "2026-09-28T15:00:00+02:00" };
+  const h = harness({ availability: () => offered([
+    { ...alternative, start_time: "2026-09-28T09:00:00+02:00" }, alternative,
+  ]) });
+  await identify(h);
+  const empty = z.object({
+    request_id: z.string(), instruction: z.string(),
+    no_booking: z.object({
+      calendar_status: z.literal("no_slots_in_requested_window"),
+      ask_other_policy: z.literal(false),
+      next_window_search: z.object({
+        patient_id: z.string(), request_id: z.string(),
+        date_from: z.string(), date_to: z.string(), prepare_booking: z.literal(true),
+      }),
+    }),
+  }).parse(await h.execute("search_availability", {
+    patient_id: patient.patient_id, specialty_id: slot.specialty_id, prepare_booking: true,
+    provider_id: slot.provider_id, location_id: slot.location_id,
+    date_from: "2026-09-21", date_to: "2026-09-21",
+    weekday: "monday", time_of_day: "afternoon", language: "ca",
+  }));
+  assert.match(empty.instruction, /Only after permission/);
+  assert.match(empty.instruction, /Do not add a booking-style confirmation/);
+  assert.deepEqual(empty.no_booking.next_window_search, {
+    patient_id: patient.patient_id, request_id: empty.request_id,
+    date_from: "2026-09-22", date_to: clinic.calendar.ends, prepare_booking: true,
+  });
+  assert.equal(h.writes.length, 0);
+  h.nextTurn();
+  const later = await searchBooking(h, empty.no_booking.next_window_search);
+  assert.deepEqual(later.slots.map((value) => value.start_time), [alternative.start_time]);
+  assert.ok(later.booking_proposal);
+  const query = h.requests.findLast((url) => url.pathname.endsWith("/availability"));
+  assert.equal(query?.searchParams.get("provider_id"), slot.provider_id);
+  assert.equal(query?.searchParams.get("location_id"), slot.location_id);
+  await assert.rejects(h.execute("report_outcome", {
+    action: "NO_ACTION", reason: "no_availability", request_id: empty.request_id,
+  }), { code: "outcome_requires_evidence" }, "A found alternative must not reuse the earlier empty-window reason");
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: later.booking_proposal.proposal_id, confirmed: true,
+  }), { code: "confirmation_requires_new_turn" });
+  h.nextTurn();
+  await h.execute("confirm_action", { proposal_id: later.booking_proposal.proposal_id, confirmed: true });
+  assert.equal(h.writes[0]?.slot, alternative.start_time);
+});
+
+test("No Slot Free guidance does not relabel eligibility, closure or anchored rescheduling as a full calendar", async () => {
+  const cases = [
+    { h: harness({ availability: () => offered([], [{ provider_id: slot.provider_id, restriction: "specialty_not_covered" }]) }),
+      input: { date_from: "2026-09-21", date_to: "2026-09-21" }, reason: "specialty_not_covered" },
+    { h: harness({ slots: [] }),
+      input: { date_from: "2026-10-12", date_to: "2026-10-12" }, reason: "clinic_closed" },
+  ];
+  for (const { h, input, reason } of cases) {
+    await identify(h);
+    const result = z.object({ no_booking: z.record(z.string(), z.unknown()) }).parse(
+      await h.execute("search_availability", {
+        patient_id: patient.patient_id, specialty_id: slot.specialty_id, location_id: slot.location_id, ...input,
+      }),
+    );
+    assert.deepEqual(result.no_booking.reason_candidates, [reason]);
+    assert.equal(result.no_booking.calendar_status, undefined);
+    assert.equal(result.no_booking.next_window_search, undefined);
+  }
+  const moving = harness({ appointments: [laterAppointment], slots: [] });
+  await identify(moving);
+  await moving.execute("list_appointments", { patient_id: patient.patient_id });
+  const result = z.object({ no_booking: z.record(z.string(), z.unknown()) }).parse(
+    await moving.execute("search_availability", {
+      patient_id: patient.patient_id, after_appointment_id: laterAppointment.appointment_id,
+    }),
+  );
+  assert.equal(result.no_booking.calendar_status, undefined);
+  assert.equal(result.no_booking.next_window_search, undefined);
+});
+
+test("No Slot Free never suggests a later window beyond the clinic calendar", async () => {
+  const h = harness({ slots: [] });
+  await identify(h);
+  const result = z.object({ no_booking: z.record(z.string(), z.unknown()) }).parse(
+    await h.execute("search_availability", { patient_id: patient.patient_id, specialty_id: slot.specialty_id }),
+  );
+  assert.equal(result.no_booking.calendar_status, "no_slots_in_requested_window");
+  assert.equal(result.no_booking.next_window_search, undefined);
+  assert.equal(h.writes.length, 0);
+});
+
 test("No Slot Free distinguishes an empty window from coverage and needs new consent for an allowed alternative", async () => {
   const alternative = { ...slot, start_time: "2026-10-05T09:30:00+02:00" };
   const h = harness({ slots: [alternative, { ...alternative, start_time: "2026-10-05T15:30:00+02:00" }] });

@@ -272,6 +272,8 @@ the grace period or extend the 180-second voice call.
   for corrections, alternatives and insurer changes. `relax_constraints` lists
   only caller-approved changes. `new_request:true` is an additional intent,
   never a replacement for an accepted action.
+  Relaxation removes the old value only when no replacement was supplied;
+  an explicitly requested new provider/site/date/time/weekday/language wins.
 - `revise_request` discards unconfirmed slots/proposals; an identity correction
   uses `find_patient.replaces_patient_id`. `get_call_state` recovers known
   patients and outcomes without repeated interrogation.
@@ -317,6 +319,11 @@ the grace period or extend the 180-second voice call.
 - For an empty exact-date search, `next_day_search`/`advance_day` moves relative
   to that searched date. Do not reuse "tomorrow" against a different anchor or
   claim to have checked the following day when the resolved window is unchanged.
+  A pure calendar gap can also return `next_window_search`, requiring approval
+  to broaden to later dates while retaining all other constraints. This is not
+  proof that other dates/sites are full and not an insurance exclusion. Never
+  execute that alternative automatically or ask for a second plan merely
+  because the requested window has no slots.
   Empty results may include bounded, request-scoped `previous_options`. They
   are historical observations, not usable slot/proposal IDs: recheck a selected
   option with its explicit date/filter arguments, match its exact time/type and
@@ -451,6 +458,7 @@ problems or promote a synthetic evaluation to a Prosper judge result.
 
 | Problem/type | Observed failure and cause | Correction / regression / status |
 | --- | --- | --- |
+| `no_slot_free` / approved alternative constraints (offline, 19 Sep) | A synthetic reproducer showed that combining relax_constraints with an explicit replacement erased the NEW doctor/site/date/time/weekday/language, widening the search instead of honoring the agreed alternative. The historical private failures cannot be attributed to this exact argument combination without their missing raw arguments. | Explicit replacements now survive relaxation; omission still removes the old constraint. Pure calendar gaps expose a permission-gated broader-window query and concise current-evidence no_availability guidance, without changing coverage/closure handling or anchored rescheduling. Regressions cover exact payloads, retained filters, fresh consent and stale-refusal rejection. No real call or judge result claimed. |
 | `no_slot_free` / later-move closure (33/36 legacy run, 19 Sep) | Three final failures had no action receipt: two BOOK negotiation paths and one RESCHEDULE path. A direct agreement arrived around 175 s without confirm_action before the cap; another final offer arrived too late for a reply. The move used an invented request ID and unsupported relative dates, then re-asked known site information after a correction. Tool paths do not establish a private problem label or hidden expected answer. | Narrow change only: concise revised offers, confirmation dispatch before additional chatter, and opt-in later_search anchored to a verified upcoming appointment. Synthetic regressions preserve caller constraints, new consent after corrections, refusal evidence, normal BOOK, one/two cancellations with one grouped approval, and no new writes on hang-up. No model, audio, global confirmation/registration rules or 60s/28s limits changed. Validation is offline; no new judged or acoustic result is claimed. |
 | Realtime 2.1 / call budget (local cohort, 19 Sep 09:42-10:21 UTC) | Of 23 recorded calls, 12 reached the local 180-second limit; five of those already had an API receipt. All 23 had incoming and outgoing signal, and every time-limited call had audio activity near the deadline. Five registration calls yielded two receipts at 179.9/183.5 seconds and three without a final receipt. | Dialogue/WAV/trace review completed privately; no judge mapping or model-controlled comparison is available. Propose shorter registration/correction readbacks and a remaining-time budget without skipping consent or extending the call. No runtime fix deployed by this review. A confirmed POST finishing in the post-close grace window is not itself invalid. |
 | Clinic transport / slow responses (same local cohort) | Eleven requests expired at the client's approximately eight-second deadline: seven GET and four POST attempts. Two BOOK retries returned duplicate, proving prior receipt despite the lost/late acknowledgment; another action remained unknown. The original network exception was not retained, so server versus network/egress cause is not established. | Correlated UTC windows and call IDs remain only in private reports. The subsequent user-authorized trial raises requests and the total confirmed-submit budget to 60 seconds, capped at 28 seconds after close. Mock-clock regressions cover long successful waits, exact deadlines, immediate read cancellation, shared retry budgets, close/abort ordering and call isolation. No new judge result or other dialogue fix is claimed. |
