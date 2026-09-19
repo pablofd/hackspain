@@ -1,7 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { TestContext } from "node:test";
 import { parseDashboardConfig } from "../src/dashboard/config.js";
+import type { TranscriptEntry } from "../src/dashboard/records.js";
+
+export function dashboardDirectory(t: TestContext) {
+  const directory = join(".local", `dashboard-test-${randomUUID()}`);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  return directory;
+}
 
 export function dashboardConfig(directory: string, overrides: NodeJS.ProcessEnv = {}) {
   return parseDashboardConfig({
@@ -41,7 +50,9 @@ export const dashboardBook = {
 };
 
 export function writeDashboardRecord(
-  directory: string, callId = "dashboard-test-call", options: { ended?: boolean; accepted?: boolean; started?: Date } = {},
+  directory: string, callId = "dashboard-test-call", options: {
+    ended?: boolean; accepted?: boolean; started?: Date; transcripts?: Omit<TranscriptEntry, "timestamp">[];
+  } = {},
 ) {
   const started = options.started ?? new Date(Date.now() - 30_000);
   const record = (type: string, extra: object = {}, offset = 0) => ({
@@ -49,7 +60,9 @@ export function writeDashboardRecord(
   });
   const lines = [
     record("start"),
-    record("transcript", { speaker: "user", itemId: "item-test", text: "PRIVATE_TRANSCRIPT_WITH_ID_00000000T" }, 1000),
+    ...(options.transcripts ?? [
+      { speaker: "user", itemId: "item-test", text: "PRIVATE_TRANSCRIPT_WITH_ID_00000000T" },
+    ]).map((entry, index) => record("transcript", entry, 1000 + index)),
     record("tool", { name: "find_patient", status: "ok", details: { name: "PRIVATE_TOOL_NAME" } }, 2000),
     record("action", { proposalId: "proposal-test", stage: "proposed", action: dashboardBook }, 3000),
     record("interruption", { reason: "caller" }, 4000),
@@ -64,7 +77,7 @@ export function writeDashboardRecord(
   const path = join(directory, `call-v1-${callId}-${started.getTime()}-${randomUUID()}.ndjson`);
   const text = `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`;
   writeFileSync(path, text, { mode: 0o600 });
-  return { path, text, started };
+  return { path, text, started, record };
 }
 
 export function dashboardFetch(options: { submissions?: boolean; fail?: boolean } = {}) {

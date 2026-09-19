@@ -2291,6 +2291,40 @@ table.data .cell-sub {
   justify-content: flex-end;
 }
 
+.transcript .chat__row {
+  animation: none;
+}
+
+.transcript .chat__meta {
+  flex-wrap: wrap;
+}
+
+.transcript__message {
+  min-width: 0;
+}
+
+.transcript__text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.transcript__detail {
+  margin-top: var(--sp-2);
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.transcript-events {
+  padding: var(--sp-3) var(--sp-5);
+  border-top: 1px solid var(--stroke-soft);
+}
+
+.transcript-events summary {
+  margin-bottom: var(--sp-2);
+  cursor: pointer;
+}
+
 .chat__typing {
   display: inline-flex;
   gap: 4px;

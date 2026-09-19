@@ -416,7 +416,9 @@ model, runtime instructions or concurrency limit during the ingress comparison.
 ## Private call records
 
 On the Linux VM, call transcripts/actions are recorded by default under
-`.local/calls/`, which is ignored by Git and never served over HTTP. Directories
+`.local/calls/`, which is ignored by Git and never served as files over HTTP. The
+authenticated dashboard can project a selected call's transcript as described
+below; raw NDJSON and WAV remain private. Directories
 use `0700` and files `0600`. Known credentials are redacted from the JSON records
 before serialization. Audio recording is a separate, explicit opt-in. This
 storage implementation uses Linux `/proc` for safe descriptor-based file access;
@@ -528,9 +530,9 @@ Prosper call or submits an action.
 | Source | Observations | Boundaries |
 | --- | --- | --- |
 | Local `/healthz` | Active call count, connector, deployment, recording and export status | Process health is not an inference success or a judge verdict. |
-| Private call records | Start/end, byte counts, interruption counts, technical events, received action verbs | Only a whitelisted projection is returned. No raw NDJSON, transcripts, action bodies, clinical notes or WAV downloads. A recent unclosed record is not proof that the caller is speaking. |
+| Private call records | Start/end, byte counts, interruption counts, technical events, received action verbs; selected-call transcript through its own authenticated endpoint | Bulk snapshots contain metadata only. No raw NDJSON, action bodies, tool details, file paths or WAV downloads. A recent unclosed record is not proof that the caller is speaking. |
 | Prosper `/clinic`, `/submissions` | Catalogue and the last 200 received records, correlated by `call_id` | A receipt is not a passing verdict. `/submit` does not update the EHR. |
-| Prosper `/directory`, upcoming appointments | Explicit name/phone search and a selected patient's appointments | No bulk directory dump. DNI/NIE, birth date, clinical notes and registration demographics are excluded from browser responses. A BOOK `patient_id` can link calls; a name/phone similarity cannot establish identity or a family relationship. |
+| Prosper `/directory`, upcoming appointments | Explicit name/phone search and a selected patient's appointments | No bulk directory dump. DNI/NIE, birth date, clinical notes and registration demographics are excluded from these structured responses. A BOOK `patient_id` can link calls; a name/phone similarity cannot establish identity or a family relationship. |
 | Azure Monitor | Supported token/audio-token usage, Realtime usage and gateway response metrics | Requires `AZURE_MONITOR_RESOURCE_ID` and the identity's metric-read permission. Scoped to the configured model deployment, not exclusively these calls. Missing samples are not zero. |
 | Foundry / Application Insights | Correlated `chat` response durations and token usage via Log Analytics | Requires `AZURE_MONITOR_WORKSPACE_ID`, a linked/exporting Application Insights resource and workspace query permission. Span duration is not caller-to-first-audio latency. Console-only traces cannot be recovered from Azure. |
 | Optional separate Speech resource | `AudioSecondsTranscribed`, `SynthesizedCharacters`, resource latency | The current agent does **not** use separate Azure Speech. An explicitly configured resource is labelled external, never attributed to voice calls. |
@@ -549,7 +551,47 @@ bounded observed sample (default seven days, up to 200 local files and 200
 receipts), not a complete population; period-over-period trends are not invented.
 The date ranges use Europe/Madrid calendar days.
 
-The metadata reader requires owner-controlled, regular, unlinked files and
+### Selected-call transcripts
+
+At the user's explicit request for these synthetic challenge conversations,
+`GET /api/dashboard/calls/{callId}/transcript` now returns a bounded text
+projection behind the **same independent dashboard token**, same-origin checks
+and `no-store` policy. This replaces the former transcript-hidden UI decision,
+not the authentication or raw-recording privacy boundary.
+
+The JSON shape is `{ callId, checkedAt, historyDays, entries, limited, limits }`.
+Each entry contains only `speaker` (`user` or `assistant`), `text`, `timestamp`
+and `itemId`, plus recorded `partial`, `startMs` and `endMs` when present.
+`limits` is `{ entries: 500, bytes: 262144 }`: the newest 500 events at most,
+within 256 KiB of projected UTF-8 JSON entries. `limited: true` explicitly warns
+that older fragments were omitted. The latest matching record must be among
+the same 200 recent local files and configured history window as the snapshot
+(default seven days, maximum thirty). Source files remain capped at 8 MiB and
+complete event lines at 64 KiB; unfinished appended lines are not invented.
+
+No transcript is added to `/api/dashboard/snapshot`, fetched for every call, or
+sent to Azure/another model for analysis. Known configured credentials are
+redacted again when projecting text and item IDs; existing redaction stays in
+place. Synthetic patient statements, including identifiers spoken in them, may
+appear in this explicitly authorized transcript view. Structured directory,
+receipt and tool fields remain excluded as before.
+
+The selected call refreshes with the existing five-second cycle. Selection
+changes, hiding the detail in the map, navigation and disconnect abort pending
+requests; late responses cannot replace another selection or session. Rendering
+uses DOM text nodes, not HTML. Whitespace, repeated words and partial fragments
+are preserved, not merged into invented turns. Speakers are labelled as the
+interlocutor and agent; partial text may be incomplete/interrupted, and **agent
+text is generated, not verified as heard**. Event timestamps are not exact
+acoustic timings; optional model intervals do not prove playback either.
+
+The UI distinguishes loading, an empty transcript, an unavailable local record
+and source errors. The API returns `401` without a valid token, `400` for an
+invalid call ID/query, `404` when no local record is in the bounded sample, and
+`503` for unsafe/unreadable/invalid source records. A Prosper receipt without a
+local record does not supply any conversation text.
+
+The shared metadata/transcript reader requires owner-controlled, regular, unlinked files and
 rejects symlinks. It never changes the voice process's source permissions.
 Additional permission/ACL bits (including those installed by a shared workspace)
 are surfaced as a warning, not mistaken for corrupt data. Review such access

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { DashboardRecords, projectCallRecord } from "../src/dashboard/records.js";
@@ -8,7 +7,7 @@ import { DashboardService } from "../src/dashboard/service.js";
 import { createDashboardServer } from "../src/dashboard/server.js";
 import { requestJson } from "../src/dashboard/source.js";
 import { z } from "zod";
-import { dashboardBook, dashboardConfig, dashboardFetch, dashboardPatient, writeDashboardRecord } from "./dashboard-fixtures.js";
+import { dashboardBook, dashboardConfig, dashboardDirectory, dashboardFetch, dashboardPatient, writeDashboardRecord } from "./dashboard-fixtures.js";
 
 test("dashboard credentials and local binding are independent of the voice endpoint", () => {
   assert.throws(() => dashboardConfig("/tmp", {
@@ -20,8 +19,7 @@ test("dashboard credentials and local binding are independent of the voice endpo
 });
 
 test("private records expose only allowed metadata, never transcript, action bodies or tools' details", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "dashboard-records-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = dashboardDirectory(t);
   const { text } = writeDashboardRecord(directory);
   const call = projectCallRecord(`${text}{"unfinished":`, "dashboard-test-call");
   assert.equal(call.transcriptEvents, 1);
@@ -36,19 +34,17 @@ test("private records expose only allowed metadata, never transcript, action bod
 });
 
 test("the record reader refuses symlinks and does not read unrelated private files", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "dashboard-record-links-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = dashboardDirectory(t);
   const { path } = writeDashboardRecord(directory);
   const privatePath = join(directory, ".env.local");
   writeFileSync(privatePath, "PRIVATE_SECRET", { mode: 0o600 });
   rmSync(path);
-  symlinkSync(privatePath, path);
+  symlinkSync(resolve(privatePath), path);
   await assert.rejects(new DashboardRecords(directory, 7).read(), { code: "dashboard_records_unavailable" });
 });
 
 test("additional source permissions are reported without modifying shared source files or exposing content", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "dashboard-record-acl-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = dashboardDirectory(t);
   const { path } = writeDashboardRecord(directory);
   chmodSync(directory, 0o770);
   chmodSync(path, 0o660);
@@ -60,8 +56,7 @@ test("additional source permissions are reported without modifying shared source
 });
 
 test("snapshot correlates actual receipts, keeps proposed actions separate and never submits a record", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "dashboard-service-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = dashboardDirectory(t);
   writeDashboardRecord(directory);
   writeDashboardRecord(directory, "open-test", { ended: false, accepted: false });
   writeDashboardRecord(directory, "old-unclosed", { ended: false, accepted: false, started: new Date(Date.now() - 300_000) });
@@ -89,8 +84,7 @@ test("snapshot correlates actual receipts, keeps proposed actions separate and n
 });
 
 test("missing sources stay explicit errors, not empty successful statistics", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "dashboard-errors-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = dashboardDirectory(t);
   const service = new DashboardService(dashboardConfig(join(directory, "missing")), dashboardFetch({ fail: true }).request);
   const result = await service.snapshot();
   assert.equal(result.sources.records.status, "error");
@@ -103,8 +97,7 @@ test("missing sources stay explicit errors, not empty successful statistics", as
 });
 
 test("successive multi-action receipts stay together without publishing registration demographics", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "dashboard-registration-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = dashboardDirectory(t);
   const upstream = dashboardFetch();
   const request: typeof fetch = async (input, init) => {
     if (new URL(String(input)).pathname !== "/api/v1/submissions") return upstream.request(input, init);
@@ -127,8 +120,7 @@ test("successive multi-action receipts stay together without publishing registra
 });
 
 test("patient lookup and upcoming appointments reuse the clinic client without leaking protected fields", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "dashboard-patients-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = dashboardDirectory(t);
   const upstream = dashboardFetch();
   const service = new DashboardService(dashboardConfig(directory), upstream.request);
   await assert.rejects(service.patients({}), { code: "dashboard_invalid_patient_search" });
@@ -147,8 +139,7 @@ test("patient lookup and upcoming appointments reuse the clinic client without l
 });
 
 test("HTTP surface is authenticated, read-only, no-store and cannot serve backend or private files", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "dashboard-http-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = dashboardDirectory(t);
   const settings = dashboardConfig(directory);
   const upstream = dashboardFetch({ submissions: false });
   const service = new DashboardService(settings, upstream.request);

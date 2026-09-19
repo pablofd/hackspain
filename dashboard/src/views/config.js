@@ -51,7 +51,7 @@ export function render() {
         el("dl", { class: "kv" },
           el("dt", {}, "Registros privados"), el("dd", {}, health ? (health.localRecording ? "Activados" : "Desactivados") : "No disponible"),
           el("dt", {}, "Audio local"), el("dd", {}, health ? (health.localAudioRecording ? "Activado" : "Desactivado") : "No disponible"),
-          el("dt", {}, "Contenido servido"), el("dd", {}, "Solo metadatos permitidos; no NDJSON, transcripciones ni WAV"))),
+          el("dt", {}, "Contenido servido"), el("dd", {}, "Metadatos y transcripción autenticada de la llamada seleccionada; sin archivos NDJSON ni WAV"))),
       card({ title: "Cumplimiento" }, emptyState("Sin puntuación automática",
         "La presencia de guardas o recibos no demuestra consentimiento correcto, exactitud clínica ni cumplimiento normativo. No se inventan porcentajes.")));
   }

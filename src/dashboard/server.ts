@@ -26,7 +26,7 @@ function json(response: ServerResponse, status: number, data: unknown): void {
 
 export function createDashboardServer(
   config: DashboardConfig,
-  service: Pick<DashboardService, "snapshot" | "patients" | "appointments">,
+  service: Pick<DashboardService, "snapshot" | "patients" | "appointments" | "transcript">,
   staticDirectory: string,
 ) {
   const root = resolve(staticDirectory);
@@ -49,6 +49,15 @@ export function createDashboardServer(
         }
         if (url.pathname === "/api/dashboard/snapshot" && !url.search) {
           json(response, 200, await service.snapshot());
+          return;
+        }
+        const transcript = /^\/api\/dashboard\/calls\/([^/]*)\/transcript$/.exec(url.pathname);
+        if (transcript) {
+          if (url.search) throw new AppError("dashboard_invalid_transcript_request");
+          let callId: string;
+          try { callId = decodeURIComponent(transcript[1] ?? ""); }
+          catch { throw new AppError("dashboard_invalid_call_id"); }
+          json(response, 200, await service.transcript(callId));
           return;
         }
         if (url.pathname === "/api/dashboard/patients") {
@@ -87,7 +96,12 @@ export function createDashboardServer(
     })().catch((error: unknown) => {
       const code = errorCode(error);
       log("warn", "dashboard.request_failed", { code });
-      if (!response.headersSent) json(response, code.startsWith("dashboard_invalid_") ? 400 : 503, { error: code });
+      if (!response.headersSent) {
+        const status = code === "dashboard_transcript_not_found" ? 404 :
+          code === "dashboard_invalid_call_id" || code === "dashboard_invalid_transcript_request" ||
+          code === "dashboard_invalid_patient_search" || code === "dashboard_invalid_patient_id" ? 400 : 503;
+        json(response, status, { error: code });
+      }
       else response.destroy();
     });
   });

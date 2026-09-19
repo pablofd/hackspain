@@ -63,7 +63,6 @@ function normaliseCalls() {
       live: call.openRecord,
       daysAgo: timestamp ? Math.floor((madridDay(snapshot.observedAt) - madridDay(timestamp)) / 86_400_000) : Infinity,
       actions,
-      transcript: [],
     };
   });
 }
@@ -94,6 +93,20 @@ export async function api(path, signal) {
   const value = await response.json();
   if (current !== connection) throw new Error("dashboard_connection_changed");
   if (!response.ok) throw new Error(value.error ?? `dashboard_http_${response.status}`);
+  return value;
+}
+
+export async function callTranscript(callId, signal) {
+  const value = await api(`/api/dashboard/calls/${encodeURIComponent(callId)}/transcript`, signal);
+  if (!value || value.callId !== callId || !Array.isArray(value.entries) || value.entries.length > 500 ||
+      typeof value.limited !== "boolean" || !Number.isFinite(Date.parse(value.checkedAt)) ||
+      value.entries.some((entry) => !entry || !["user", "assistant"].includes(entry.speaker) ||
+        typeof entry.text !== "string" || typeof entry.itemId !== "string" ||
+        typeof entry.timestamp !== "string" || !Number.isFinite(Date.parse(entry.timestamp)) ||
+        (entry.partial !== undefined && typeof entry.partial !== "boolean") ||
+        (entry.startMs === undefined ? entry.endMs !== undefined :
+          !Number.isFinite(entry.startMs) || !Number.isFinite(entry.endMs) ||
+          entry.startMs < 0 || entry.endMs < entry.startMs))) throw new Error("dashboard_invalid_response");
   return value;
 }
 

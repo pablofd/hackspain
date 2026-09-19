@@ -49,7 +49,7 @@ export function render(param) {
           el("dt", {}, "Teléfono"), el("dd", { class: "mono" }, selected.phone),
           el("dt", {}, "Fuente"), el("dd", {}, "Directorio Prosper"),
           el("dt", {}, "Riesgo clínico"), el("dd", {}, "No evaluado")),
-        el("p", { class: "card__sub" }, "DNI/NIE, fecha de nacimiento y notas clínicas no se envían al navegador."),
+        el("p", { class: "card__sub" }, "Esta ficha excluye DNI/NIE, fecha de nacimiento y notas clínicas del directorio."),
         el("button", { class: "btn btn--sm", disabled: true, title: "El backend solo recibe llamadas entrantes" }, "Llamar")),
       card({ title: "Próximas citas", sub: "EHR de solo lectura; los envíos /submit no modifican esta agenda" },
         appointments === null ? el("p", { class: "text-sm", role: "status" }, appointmentStatus) :

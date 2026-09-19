@@ -73,7 +73,10 @@ export class DashboardService {
     azure?: DashboardAzure,
   ) {
     this.prosper = new ProsperClient(config.voice, request);
-    this.records = new DashboardRecords(config.DASHBOARD_RECORDS_DIR, config.DASHBOARD_HISTORY_DAYS);
+    this.records = new DashboardRecords(config.DASHBOARD_RECORDS_DIR, config.DASHBOARD_HISTORY_DAYS, [
+      config.DASHBOARD_TOKEN, config.voice.PROSPER_API_KEY, config.voice.VOICE_ENDPOINT_TOKEN,
+      config.voice.AZURE_OPENAI_API_KEY ?? "", config.voice.APPLICATIONINSIGHTS_CONNECTION_STRING ?? "",
+    ]);
     this.azure = azure ?? new DashboardAzure(config, request);
   }
 
@@ -169,8 +172,12 @@ export class DashboardService {
         Date.parse(b.startedAt ?? b.receivedAt ?? "") - Date.parse(a.startedAt ?? a.receivedAt ?? "")),
       cloud: { openAi: openAi.data, speech: speech.data },
       unavailable: ["sentiment", "intent_confidence", "mos", "jitter", "packet_loss", "asr_accuracy",
-        "turn_latency", "nps", "clinical_risk", "cost", "audio_playback", "private_transcripts"],
+        "turn_latency", "nps", "clinical_risk", "cost", "audio_playback"],
     };
+  }
+
+  async transcript(callId: string) {
+    return this.records.transcript(callId);
   }
 
   async patients(query: unknown) {

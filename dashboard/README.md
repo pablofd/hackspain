@@ -68,6 +68,12 @@ y respuestas `no-store`:
 
 - `GET /api/dashboard/snapshot`: salud, catálogo, llamadas/recibos observados,
   metadatos técnicos y métricas Azure, con estado y fecha de cada fuente.
+  Nunca incluye texto ni fragmentos de transcripción.
+- `GET /api/dashboard/calls/{callId}/transcript`: proyección autenticada de
+  **una llamada seleccionada**, solicitada explícitamente para los pacientes
+  sintéticos del reto. Devuelve `{ callId, checkedAt, historyDays, entries,
+  limited, limits }`; cada entrada contiene `speaker`, `text`, `timestamp`,
+  `itemId` y, si existen, `partial`, `startMs` y `endMs`.
 - `GET /api/dashboard/patients?name=...` o `?phone=...`: búsqueda explícita
   en Prosper; solo ID, nombre, teléfono y aseguradora.
 - `GET /api/dashboard/patients/{id}/appointments`: citas próximas del EHR.
@@ -78,9 +84,31 @@ Las llamadas se relacionan por el `patient_id` de un BOOK recibido, nunca por
 un parecido de nombres ni por un teléfono compartido. La lista y el mapa
 mantienen los mismos filtros. No se consultan fotografías ni tipografías externas.
 
-La vista de llamada actualiza los eventos técnicos cada cinco segundos. Las
-transcripciones y el audio privados permanecen fuera de HTTP; no se inventan
-ondas de audio, marcas de tiempo de turnos o indicadores de que alguien habla.
+La vista de llamada actualiza sus eventos técnicos y la transcripción
+seleccionada cada cinco segundos, sin descargar las demás conversaciones.
+Muestra los últimos 500 fragmentos como máximo y hasta 256 KiB de entradas JSON
+UTF-8, con aviso `limited` cuando no caben todos. Solo se consulta el último
+archivo de la llamada dentro de los 200 registros recientes y la ventana
+configurada (siete días por defecto). Se reutilizan las comprobaciones de
+propietario, archivo regular, enlaces y límites de 8 MiB por archivo / 64 KiB
+por evento. Los NDJSON crudos, las rutas, los detalles de herramientas y los WAV
+siguen privados: no hay descarga ni proxy de archivos.
+
+El texto se inserta con nodos DOM, nunca como HTML. Se preservan espacios,
+repeticiones, credenciales ya ocultas y la redacción adicional de las claves
+configuradas. Los datos sintéticos dichos por el interlocutor sí pueden aparecer
+en esta vista autorizada; no se cambia la proyección del directorio ni de los
+recibos. Los fragmentos parciales se etiquetan sin fingir turnos completos.
+El texto del agente es **generado**, puede estar interrumpido y no prueba que se
+haya oído. La hora del registro no es tiempo acústico exacto y los intervalos
+del modelo no confirman reproducción.
+
+Hay estados distintos de carga, sin transcripción, registro no encontrado y
+error de fuente (`401` sin acceso, `400` ID/consulta inválidos, `404` fuera de la
+muestra local, `503` fallo del registro). Cambiar de selección, abrir el mapa,
+navegar o desconectar cancela las peticiones; las respuestas antiguas no repintan
+otra llamada ni una sesión nueva. No se envía texto a ningún modelo o servicio.
+No se inventan ondas de audio, turnos ni indicadores de que alguien habla.
 Sentimiento, intenciones, MOS, exactitud ASR, personalidad, NPS y riesgo clínico
 no están implementados y se muestran como no disponibles. La configuración del
 agente continúa exclusivamente en el backend.
@@ -98,6 +126,8 @@ npx playwright install chromium
 npm run test:dashboard
 ```
 
-Las pruebas usan pacientes y respuestas sintéticas, un navegador local y ningún
-servicio de pago. `npm test` incluye los contratos offline; el navegador se
+Las pruebas usan pacientes y respuestas sintéticas, directorios de fixtures
+bajo `.local/`, un navegador local y ningún servicio de pago. Incluyen límites,
+redacción, autenticación, texto XSS literal, fragmentos, actualización y carreras
+de selección/desconexión. `npm test` incluye los contratos offline; el navegador se
 ejecuta explícitamente mediante `test:dashboard`.
