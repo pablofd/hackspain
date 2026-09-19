@@ -5,7 +5,7 @@ import { z } from "zod";
 import { ProsperClient, type Clinic } from "../src/prosper.js";
 import { actionSchema, type Availability, type ProsperAction, type Slot, type Patient } from "../src/prosper-types.js";
 import type { AddressResolver } from "../src/geography.js";
-import { ConfirmationGate } from "../src/confirmation.js";
+import { ConfirmationGate, type OutcomeReviewContext } from "../src/confirmation.js";
 import { Receptionist, receptionistInstructions, receptionistTools } from "../src/receptionist.js";
 import { registrationReadbackGuidance } from "../src/registration.js";
 
@@ -60,7 +60,7 @@ function harness(options: {
   addressResolver?: Pick<AddressResolver, "resolve">;
   startedAt?: Date;
   beforeConfirmation?: (turn: number) => Promise<void>;
-  beforeOutcome?: (turn: number, reason: string) => Promise<void>;
+  beforeOutcome?: (turn: number, reason: string, context: OutcomeReviewContext) => Promise<void>;
 } = {}) {
   let turn = 1;
   const controller = new AbortController();
@@ -201,6 +201,151 @@ test("unverified identities cannot read appointments or availability and protect
   await h.execute("find_patient", { name: "Ana Prueba Test", national_id: "00000000T" });
   await assert.rejects(h.execute("list_appointments", { patient_id: "PTEST" }));
   assert.equal(h.writes.length, 0);
+});
+
+test("an incomplete name asks for the full name rather than cycling a matching identifier", async () => {
+  const h = harness();
+  const result = z.object({
+    needs_full_name: z.boolean(), instruction: z.string(),
+    matches: z.array(z.object({ verified: z.boolean() })),
+  }).parse(await h.execute("find_patient", { name: "Ana", national_id: patient.national_id }));
+  assert.equal(result.needs_full_name, true);
+  assert.equal(result.matches[0]?.verified, false);
+  assert.match(result.instruction, /full legal name/);
+  assert.match(result.instruction, /Reuse the corroborating detail already supplied/);
+  assert.match(result.instruction, /Never supply or read the stored name/);
+  assert.ok(!JSON.stringify(result).includes(patient.national_id));
+  assert.ok(!JSON.stringify(result).includes(patient.phone));
+  await assert.rejects(h.execute("list_appointments", { patient_id: patient.patient_id }), { code: "patient_unverified" });
+  const verified = z.object({
+    needs_full_name: z.boolean(), matches: z.array(z.object({ verified: z.boolean() })),
+  }).parse(await h.execute("find_patient", { name: "Ana Prueba Test", national_id: patient.national_id }));
+  assert.equal(verified.needs_full_name, false);
+  assert.equal(verified.matches[0]?.verified, true);
+  await h.execute("list_appointments", { patient_id: patient.patient_id });
+  const lookups = h.requests.filter((url) => url.pathname.endsWith("/directory"));
+  assert.equal(lookups.length, 2);
+  assert.ok(lookups.every((url) => !url.searchParams.has("phone") && !url.searchParams.has("date_of_birth")));
+  assert.equal(h.writes.length, 0);
+});
+
+test("a missing name reuses a supplied birth date without asking for a different corroborator", async () => {
+  const h = harness();
+  const result = z.object({ needs_full_name: z.boolean(), instruction: z.string() }).parse(
+    await h.execute("find_patient", { date_of_birth: patient.date_of_birth }),
+  );
+  assert.equal(result.needs_full_name, true);
+  assert.match(result.instruction, /Ask only for the patient's full legal name/);
+  await assert.rejects(h.execute("search_availability", {
+    patient_id: patient.patient_id, specialty_id: "general_practice",
+  }), { code: "patient_unverified" });
+  const verified = z.object({ matches: z.array(z.object({ verified: z.boolean() })) }).parse(
+    await h.execute("find_patient", { name: "Ana Prueba Test", date_of_birth: patient.date_of_birth }),
+  );
+  assert.equal(verified.matches[0]?.verified, true);
+  assert.equal(h.writes.length, 0);
+});
+
+test("a lone given name still requests one corroborator rather than claiming one was supplied", async () => {
+  const h = harness();
+  const result = z.object({ needs_full_name: z.boolean(), instruction: z.string() }).parse(
+    await h.execute("find_patient", { name: "Ana" }),
+  );
+  assert.equal(result.needs_full_name, true);
+  assert.match(result.instruction, /full legal name and one corroborating detail/);
+  assert.doesNotMatch(result.instruction, /Reuse/);
+  assert.equal(h.writes.length, 0);
+});
+
+test("an empty alternative search retains bounded historical options without reviving old drafts", async () => {
+  const h = harness();
+  await identify(h);
+  const first = z.object({
+    request_id: z.string(), booking_proposal: z.object({ proposal_id: z.string() }),
+  }).parse(await h.execute("search_availability", {
+    patient_id: patient.patient_id, specialty_id: slot.specialty_id, prepare_booking: true,
+  }));
+  h.nextTurn();
+  const historical = z.object({
+    start_time: z.string(), requires_new_search: z.literal(true), submitted: z.literal(false),
+    recheck: z.record(z.string(), z.unknown()),
+  });
+  const empty = z.object({ no_booking: z.object({
+    previous_options: z.array(historical),
+  }) }).parse(await h.execute("search_availability", {
+    patient_id: patient.patient_id, request_id: first.request_id, date_phrase: "Monday",
+  }));
+  assert.equal(empty.no_booking.previous_options[0]?.start_time, slot.start_time);
+  const recheck = empty.no_booking.previous_options[0]?.recheck;
+  assert.ok(recheck);
+  assert.equal(recheck.date_from, "2026-09-19");
+  assert.equal(recheck.date_to, "2026-09-19");
+  assert.equal(recheck.weekday, "saturday");
+  assert.equal(recheck.prepare_booking, undefined, "Historical lookup must not silently select a different earliest slot");
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: first.booking_proposal.proposal_id, confirmed: true,
+  }), { code: "proposal_not_found" });
+  const state = z.object({ requests: z.array(z.object({
+    request_id: z.string(), previous_options: z.array(historical),
+  })) }).parse(await h.execute("get_call_state", {}));
+  assert.equal(state.requests[0]?.previous_options[0]?.start_time, slot.start_time);
+  h.nextTurn();
+  const refreshed = z.object({ slots: z.array(z.object({ slot_id: z.string() })) }).parse(
+    await h.execute("search_availability", recheck),
+  );
+  const proposal = z.object({ proposal_id: z.string() }).parse(await h.execute("prepare_action", {
+    request: { action: "BOOK", patient_id: patient.patient_id, slot_id: refreshed.slots[0]?.slot_id, policy_id: patient.insurer },
+  }));
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: proposal.proposal_id, confirmed: true,
+  }), { code: "confirmation_requires_new_turn" });
+  h.nextTurn();
+  await h.execute("confirm_action", { proposal_id: proposal.proposal_id, confirmed: true });
+  assert.equal(h.writes.length, 1);
+  assert.equal(h.writes[0]?.slot, slot.start_time);
+});
+
+test("outcome review receives current request evidence and cannot refuse an accepted historical offer", async () => {
+  let current = 1;
+  const gate = new ConfirmationGate(() => current, new AbortController().signal);
+  const h = harness({ beforeOutcome: (turn, reason, context) => gate.reviewOutcome(turn, reason, context) });
+  await identify(h);
+  const result = z.object({ request_id: z.string() }).parse(await h.execute("search_availability", {
+    patient_id: patient.patient_id, specialty_id: slot.specialty_id, prepare_booking: true,
+  }));
+  h.nextTurn(); current += 1;
+  await h.execute("search_availability", {
+    patient_id: patient.patient_id, request_id: result.request_id, date_phrase: "Monday",
+  });
+  h.nextTurn(); current += 1;
+  gate.observe(current, "Saturday morning then. Yes, book it.");
+  await assert.rejects(h.execute("report_outcome", {
+    action: "NO_ACTION", reason: "no_availability", request_id: result.request_id,
+  }), { code: "outcome_request_unresolved" });
+  assert.equal(h.writes.length, 0);
+});
+
+test("historical alternatives preserve current specialty, site and request isolation", async () => {
+  const h = harness({ clinic: {
+    ...clinic, locations: [...clinic.locations, { ...clinic.locations[0]!, id: "other-site" }],
+  } });
+  await identify(h);
+  const first = z.object({ request_id: z.string() }).parse(await h.execute("search_availability", {
+    patient_id: patient.patient_id, specialty_id: slot.specialty_id,
+  }));
+  const filtered = z.object({ no_booking: z.object({ previous_options: z.array(z.unknown()) }) }).parse(
+    await h.execute("search_availability", {
+      patient_id: patient.patient_id, request_id: first.request_id, location_id: "other-site",
+      date_phrase: "Monday",
+    }),
+  );
+  assert.deepEqual(filtered.no_booking.previous_options, []);
+  const separate = z.object({ no_booking: z.object({ previous_options: z.array(z.unknown()) }) }).parse(
+    await h.execute("search_availability", {
+      patient_id: patient.patient_id, specialty_id: slot.specialty_id, new_request: true, date_phrase: "Monday",
+    }),
+  );
+  assert.deepEqual(separate.no_booking.previous_options, []);
 });
 
 test("same-day slots are excluded and earliest search reaches later 14-day windows", async () => {

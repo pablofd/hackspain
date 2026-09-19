@@ -162,7 +162,32 @@ const monthNames: Readonly<Record<string, number>> = {
   gener: 1, febrer: 2, marc: 3, maig: 5, juny: 6,
   juliol: 7, agost: 8, setembre: 9, novembre: 11, desembre: 12,
 };
-const spokenDayNumbers: Readonly<Record<string, number>> = { twelfth: 12, doce: 12, dotze: 12 };
+const englishOrdinalDays = [
+  "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
+  "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth", "sixteenth", "seventeenth",
+  "eighteenth", "nineteenth", "twentieth", "twenty first", "twenty second", "twenty third",
+  "twenty fourth", "twenty fifth", "twenty sixth", "twenty seventh", "twenty eighth",
+  "twenty ninth", "thirtieth", "thirty first",
+];
+const spanishDayNumbers = [
+  "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez",
+  "once", "doce", "trece", "catorce", "quince", "dieciseis", "diecisiete", "dieciocho",
+  "diecinueve", "veinte", "veintiuno", "veintidos", "veintitres", "veinticuatro",
+  "veinticinco", "veintiseis", "veintisiete", "veintiocho", "veintinueve", "treinta", "treinta y uno",
+];
+const catalanDayNumbers = [
+  "u", "dos", "tres", "quatre", "cinc", "sis", "set", "vuit", "nou", "deu", "onze", "dotze",
+  "tretze", "catorze", "quinze", "setze", "disset", "divuit", "dinou", "vint", "vint-i-u",
+  "vint-i-dos", "vint-i-tres", "vint-i-quatre", "vint-i-cinc", "vint-i-sis", "vint-i-set",
+  "vint-i-vuit", "vint-i-nou", "trenta", "trenta-u",
+];
+const spokenDayNumbers: Readonly<Record<string, number>> = Object.fromEntries([
+  ...[englishOrdinalDays, spanishDayNumbers, catalanDayNumbers].flatMap((names) =>
+    names.flatMap((name, index) => [
+      [name, index + 1], [name.replaceAll(" ", "-"), index + 1], [name.replaceAll("-", " "), index + 1],
+    ])),
+  ["primero", 1], ["primer", 1], ["vint-i-un", 21], ["trenta-un", 31],
+]);
 const weekdayPattern = new RegExp(
   `^(?:(?:on|this coming|this|next|el proximo|proximo|el proper|proper|el proxim|proxim|el|este|aquest) )?` +
   `(${Object.keys(dayNames).join("|")})(?: (?:que viene|vinent))?$`,
@@ -190,6 +215,8 @@ function conflict(message: string): never {
 
 function parsePhrase(value: string, today: string): ParsedPhrase {
   let phrase = normalize(value).replace(/\s*,\s*/g, " ").trim();
+  const only = /^(?:only|solo|solamente|nomes)\s+|\s+(?:only|solo|solamente|nomes)$/g;
+  phrase = phrase.replace(only, "").trim();
   let timeOfDay: Exclude<TimeOfDay, "any"> | undefined;
   const setTime = (time: Exclude<TimeOfDay, "any">) => {
     if (timeOfDay && timeOfDay !== time) conflict("The phrase specifies both morning and afternoon.");
@@ -209,6 +236,7 @@ function parsePhrase(value: string, today: string): ParsedPhrase {
       phrase = phrase.replace(pattern, "");
       setTime(time);
     }
+    phrase = phrase.replace(only, "").trim();
   }
   const time = timeOfDay ? { timeOfDay } : {};
   const relative = ownValue(relativeDays, phrase);

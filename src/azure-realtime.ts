@@ -73,6 +73,12 @@ const responseSchema = z.object({
     }).nullish(),
   }),
 });
+const failureDetailsSchema = z.object({
+  response: z.object({ status_details: z.object({
+    reason: z.string().nullish(),
+    error: z.object({ code: z.string().nullish() }).nullish(),
+  }).nullish() }),
+});
 
 export function azureRealtimeUrl(config: Config): string {
   const url = new URL("/openai/realtime", config.AZURE_OPENAI_ENDPOINT);
@@ -149,7 +155,7 @@ export function createAzureVoiceFactory(
         signal: AbortSignal.any([call.signal, operations.signal]),
         allowSubmissions: call.allowSubmissions === true,
         generation: () => generation, record, beforeConfirmation: (turn) => confirmation.review(turn),
-        beforeOutcome: (turn, reason) => confirmation.reviewOutcome(turn, reason),
+        beforeOutcome: (turn, reason, context) => confirmation.reviewOutcome(turn, reason, context),
       });
       const deadline = setTimeout(() => fail(new AppError("azure_session_timeout")), 15_000);
 
@@ -519,6 +525,12 @@ export function createAzureVoiceFactory(
             span.end();
             recordPartialTranscripts(turn);
             if (response.status === "failed" || response.status === "incomplete") {
+              const parsed = failureDetailsSchema.safeParse(event);
+              const details = parsed.success ? parsed.data.response.status_details : undefined;
+              const reason = details?.error?.code ?? details?.reason;
+              if (reason && /^[a-zA-Z0-9_]{1,32}$/.test(reason)) {
+                record({ type: "error", code: `azure_response_${response.status}_${reason}` });
+              }
               throw new AppError(`azure_response_${response.status}`);
             }
             if (turn.jobs.length) await Promise.all(turn.jobs);

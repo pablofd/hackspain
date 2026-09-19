@@ -230,6 +230,52 @@ test("new date formats still enforce weekday agreement, real dates, same-day pro
   }), hasCode("conflicting_date_request"));
 });
 
+test("all English spoken ordinal calendar days support spaced and hyphenated forms", () => {
+  const ordinals = [
+    "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
+    "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth", "sixteenth", "seventeenth",
+    "eighteenth", "nineteenth", "twentieth", "twenty first", "twenty second", "twenty third",
+    "twenty fourth", "twenty fifth", "twenty sixth", "twenty seventh", "twenty eighth",
+    "twenty ninth", "thirtieth", "thirty first",
+  ];
+  const fullYear = { ...calendar, starts: "2026-01-01", ends: "2026-12-31", closure_days: [] };
+  for (const [index, ordinal] of ordinals.entries()) {
+    for (const phrase of [`the ${ordinal} of January 2026`, `January the ${ordinal.replaceAll(" ", "-")} 2026`]) {
+      const result = resolveDateRequest({ date_phrase: phrase }, new Date("2025-12-31T12:00:00Z"), fullYear, []);
+      assert.equal(result.dateFrom, `2026-01-${String(index + 1).padStart(2, "0")}`, phrase);
+      assert.equal(result.dateTo, result.dateFrom);
+    }
+  }
+});
+
+test("spoken dates and an only qualifier stay exact without dropping time or closure constraints", () => {
+  for (const phrase of [
+    "Monday the twenty-first of September only",
+    "Monday the twenty first of September",
+    "lunes veintiuno de septiembre solamente",
+    "dilluns vint-i-u de setembre nomes",
+  ]) {
+    const result = resolve({ date_phrase: phrase });
+    assert.equal(result.dateFrom, "2026-09-21", phrase);
+    assert.equal(result.dateTo, "2026-09-21", phrase);
+  }
+  const morning = resolve({ date_phrase: "only Wednesday the seventh of October in the morning" });
+  assert.equal(morning.dateFrom, "2026-10-07");
+  assert.equal(morning.timeOfDay, "morning");
+  const closed = resolve({ date_phrase: "Monday the twelfth of October only" });
+  assert.equal(closed.dateFrom, "2026-10-12");
+  assert.equal(closed.adjustedFrom, undefined);
+  assert.equal(closed.closed?.reason, "clinic_closed");
+  assert.throws(() => resolve({ date_phrase: "Tuesday the twenty-first of September only" }),
+    hasCode("conflicting_date_request"));
+  assert.throws(() => resolve({ date_phrase: "September the thirty-first only" }), hasCode("invalid_date"));
+  for (const phrase of [
+    "Monday the twenty-first of September only after 16:30",
+    "Monday only or Tuesday",
+    "only Monday except mornings",
+  ]) assert.throws(() => resolve({ date_phrase: phrase }), hasCode("unknown_date_phrase"), phrase);
+});
+
 test("punctuated weekday phrases retain the Madrid call-date anchor and strict-next-weekday rule", () => {
   const afterMadridMidnight = new Date("2026-09-29T22:30:00Z");
   for (const phrase of ["this coming Wednesday,", "el próximo miércoles,", "el proper dimecres,"]) {

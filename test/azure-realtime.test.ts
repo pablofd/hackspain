@@ -543,6 +543,22 @@ test("failed or incomplete responses cannot report a successful turn", async (t)
   }
 });
 
+test("failed response diagnostics retain only a bounded provider code, never the upstream message", async (t) => {
+  const h = harness(t);
+  await h.connect();
+  h.socket.created("failed-response");
+  h.socket.receive({ type: "response.done", response: {
+    id: "failed-response", status: "failed",
+    status_details: { type: "failed", error: {
+      code: "server_error", message: "synthetic private upstream details must not be copied",
+    } },
+  } });
+  await settle();
+  assert.deepEqual(h.failures.map((error) => error.code), ["azure_response_failed"]);
+  assert.ok(h.records.some((event) => event.type === "error" && event.code === "azure_response_failed_server_error"));
+  assert.ok(!JSON.stringify(h.records).includes("synthetic private upstream"));
+});
+
 test("HTTP handshake failure and session initialization timeout reject the connection", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const denied = harness(t);

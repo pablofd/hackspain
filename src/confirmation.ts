@@ -3,6 +3,11 @@ import { setTimeout as delay } from "node:timers/promises";
 import { AppError } from "./errors.js";
 import { normalizeHumanText } from "./prosper-types.js";
 
+export interface OutcomeReviewContext {
+  hasClinicalRequest: boolean;
+  hasPreviousOptions: boolean;
+}
+
 const priceTopic = /\b(?:costs?|prices?|fees?|charges?|pay|payment|co[- ]?pay(?:ment)?s?|precio|coste|costo|cuesta|costar|costaria|costara|copago|tarifa|pagar|pagare|cobran|cobrar(?:an|ia|ian|ien)?|preu|costa|copagament)\b/;
 const priceQuestion = /^(?:how much|what|do i|does|will i|would i|is there|is that|cuanto|cual|hay|tengo que|quant|quin|quina|que|hi ha|cal)\b|\b(?:can|could|would)\s+you\s+(?:please\s+)?(?:tell|explain|confirm|quote)\b|\b(?:puedes|puede|podrias|podria)\s+(?:decirme|decir|explicar|confirmar)\b|\b(?:pots|podeu|podries)\s+(?:dir|explicar|confirmar)\b|^(?:i (?:need|want) to|i'd like to|i would like to)\s+(?:know|check|confirm|understand)\b|^(?:necesito|quiero|quisiera|vull|necessito|voldria)\s+(?:saber|comprobar|comprovar|confirmar)\b/;
 const beforeAgreement = /\b(?:before (?:i )?(?:agree|accept|confirm|book)|antes de (?:aceptar|confirmar|reservar)|abans (?:de |d')(?:acceptar|confirmar|reservar))\b/;
@@ -29,6 +34,15 @@ function hasPriceQuestion(normalized: string): boolean {
   });
 }
 
+function hasAvailabilityQuestion(normalized: string): boolean {
+  return normalized.split(/[.!?;,\n]+/).some((part) => {
+    const clause = part.trim().replace(/^[¿¡]+/, "");
+    const question = /\b(?:is|are)\s+there\b|\b(?:do|could|can|would)\s+(?:you|they)\s+(?:have|offer)\b|\bdoes\s+(?:[a-z'-]+\s+){1,6}(?:have|offer)\b|\b(?:is|could|would|can)\s+(?:it|that|this|the appointment)\b|^(?:what|how)\s+about\b|^(?:anything|something|any (?:appointments?|slots?|times?))\b|\b(?:hay|tiene|teneis|tienen|ofreceis|hi ha|teniu|tenen|ofereix|ofereixen)\b|\b(?:puede|podria|pot|podria)\s+ser\b/.test(clause);
+    const topic = /\b(?:appointments?|slots?|times?|dates?|days?|doctors?|providers?|hours?|evenings?|weekends?|anything|earlier|later|outside|after work|before work|morning|afternoon|citas?|huecos?|horas?|horarios?|fechas?|dias?|medicos?|fuera|tarde|antes|despues|cites?|hores?|horaris?|dates?|dies?|metges?|fora|tarda|abans|despres)\b/.test(clause);
+    return question && topic;
+  });
+}
+
 function hasAffirmativeCue(normalized: string, cue: RegExp): boolean {
   return [...normalized.matchAll(new RegExp(cue.source, "g"))].some((match) =>
     !/\b(?:no|not|never|don't|do not|won't|will not)(?:\s+(?:want|need|wish)(?:\s+to)?)?\s+$/.test(
@@ -50,9 +64,23 @@ export function hasVoluntarySelfDeferral(text: string): boolean {
   return hasBookingDeferral(normalized) && !permissionUnavailable.test(normalized) && !waitingForPermission.test(normalized);
 }
 
+function hasBookingSelection(text: string): boolean {
+  const normalized = normalizeTranscript(text);
+  if (/\b(?:don't|do not|no|not)\s+(?:book|reserve|reserves|reserve|reservis)\b/.test(normalized)) return false;
+  return /\b(?:book|reserve)\s+(?:it|that(?: one| appointment| slot)?|this appointment)\b|\b(?:reserva|reserve|reservi|reservar)\s+(?:esa|ese|aquesta|aquella|la cita)\b|\b(?:si|d'acord|perfecte|vale)[^.!?;]{0,40}\b(?:reserva|reservem|endavant|adelante)\b/.test(normalized);
+}
+
+function isPlainBookingDeferral(text: string): boolean {
+  const normalized = normalizeTranscript(text).replace(/[.!?,;]+/g, " ").replace(/\s+/g, " ").trim();
+  return /^(?:(?:ah right|right|okay|ok|well)\s+)?(?:i(?:'ll| will)|we(?:'ll| will))\s+(?:hold off|wait)(?:\s+(?:then|for now|on booking))?(?:\s+(?:thank you|thanks|goodbye))?$/.test(normalized) ||
+    /^(?:i|we)\s+(?:need|want|have)\s+to\s+(?:know|check|confirm)\s+(?:what|how much)\s+(?:it(?:'ll| will)|this appointment will)\s+cost\s+(?:me|us)\s+(?:first|before booking)(?:\s+(?:thank you|thanks|goodbye))?$/.test(normalized) ||
+    /^(?:prefiero|prefereixo)\s+esperar(?:\s+(?:por ahora|de momento|per ara|de moment))?(?:\s+(?:gracias|gracies|adios|adeu))?$/.test(normalized) ||
+    /^(?:necesito|necessito)\s+saber\s+(?:cuanto|quant)\s+(?:me|em)\s+(?:costara|costaria)\s+(?:primero|primer|antes de reservar|abans de reservar)(?:\s+(?:gracias|gracies|adios|adeu))?$/.test(normalized);
+}
+
 export function hasUnresolvedQualification(text: string): boolean {
   const normalized = normalizeTranscript(text);
-  if (hasPriceQuestion(normalized) || hasBookingDeferral(normalized)) return true;
+  if (hasPriceQuestion(normalized) || hasBookingDeferral(normalized) || hasAvailabilityQuestion(normalized)) return true;
   if (/\b(?:but|however|except|instead|actually|pero|sin embargo|en realidad|en vez|en canvi|en lloc)\b/.test(normalized)) return true;
   if (/\b(?:can|could|would|may)\s+(?:you|we|i)\s+(?:check|look|find|see|try|change|move)\b/.test(normalized)) return true;
   if (/\b(?:puedes|podrias|puede|podria|podries|pots)\s+(?:mirar|comprobar|buscar|canviar|cambiar|revisar|comprovar)\b/.test(normalized)) return true;
@@ -130,19 +158,24 @@ export class ConfirmationGate {
   }
 
   /** For a fresh NO_ACTION, not emergency escalation or an identical accepted-action retry. */
-  async reviewOutcome(turn: number, reason: string): Promise<void> {
+  async reviewOutcome(turn: number, reason: string, context?: OutcomeReviewContext): Promise<void> {
     if (reason === "medical_emergency") return;
     const checkVoluntaryDeferral = reason === "caller_not_authorised";
+    const checkScopeDeferral = reason === "out_of_scope" && context?.hasClinicalRequest === true;
     await this.reviewTranscript(turn, {
       pendingCode: "outcome_transcript_pending",
       pendingMessage: "The current caller turn has not been fully transcribed yet. Nothing was submitted. Wait for that turn; do not ask for an extra refusal confirmation.",
       reject: (text) => checkVoluntaryDeferral
-        ? hasVoluntarySelfDeferral(text)
-        : clinicOutcomeReasons.has(reason) && hasUnresolvedOutcomeRequest(text),
-      rejectionCode: checkVoluntaryDeferral ? "outcome_reason_not_supported" : "outcome_request_unresolved",
+        ? hasVoluntarySelfDeferral(text) || isPlainBookingDeferral(text)
+        : checkScopeDeferral && isPlainBookingDeferral(text) ||
+          reason === "no_availability" && context?.hasPreviousOptions === true && hasBookingSelection(text) ||
+          clinicOutcomeReasons.has(reason) && hasUnresolvedOutcomeRequest(text),
+      rejectionCode: checkVoluntaryDeferral || checkScopeDeferral ? "outcome_reason_not_supported" : "outcome_request_unresolved",
       rejectionMessage: checkVoluntaryDeferral
-        ? "The caller explicitly chose to defer booking; this is not evidence that they lack permission. Do not submit caller_not_authorised or substitute another refusal reason. Keep the action unconfirmed and respect the caller's condition."
-        : "The current caller turn still requests an alternative, a correction, a search or registration. Do not submit NO_ACTION. Resolve the latest request first; having no second policy does not mean acceptable alternatives are exhausted.",
+        ? "The caller chose to defer a legitimate booking. Do not submit caller_not_authorised or substitute another refusal reason. Never promise a price or book without consent; keep the action unconfirmed and respect the caller's condition."
+        : checkScopeDeferral
+          ? "The caller chose to defer a legitimate clinic booking, not make an out-of-scope request. Do not invent or substitute a refusal reason, promise a price, or book without consent. Keep the action unconfirmed and respect the caller's condition."
+        : "The caller still requests or selects an appointment, alternative, correction or registration. Do not submit NO_ACTION using an earlier empty date. Check get_call_state/previous_options, re-search the caller's selected date with explicit date_from/date_to, then prepare the matching option and obtain fresh confirmation. Do not substitute another refusal reason or invent a new request to bypass this check.",
     });
   }
 
