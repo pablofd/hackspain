@@ -163,6 +163,15 @@ The tool layer keeps state per call, separate from the language model:
   Calendar-only refusals do not need an insurance detour or booking-style extra
   confirmation: after alternatives are declined or none remain, report the
   current request's `no_availability` before closing.
+  Privacy-only requests for stored identifiers, patient lists or another
+  person's appointment details use `out_of_scope`, not `caller_not_authorised`.
+  A conservative EN/ES/CA guard checks recent caller text before the first
+  submission, retains a disclosure request through identity-only follow-ups,
+  and rejects that wrong reason with explicit recovery guidance. It never
+  silently rewrites a payload or repairs an accepted action. Genuine
+  third-party scheduling keeps its normal verification and authorization
+  behavior; explicit new scheduling intent clears the older privacy context.
+  Do not keep requesting identifiers as a way to unlock a privacy-only request.
 
 ## Documented problem workflows
 
