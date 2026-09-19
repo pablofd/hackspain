@@ -62,7 +62,7 @@ npm --silent run prosper -- watch --run-id RUN_ID --json
 Only run the admission command when a person requests a scored call. No build,
 test, connection check or server startup invokes it. The API allows one queued
 or active run per team, across both lanes. The current scored lane has a global
-12-minute cooldown after the previous scored run finishes, not after admission
+5-minute cooldown after the previous scored run finishes, not after admission
 and not separately per problem; `--wait` observes it without repeated POSTs.
 Practice has its own 30-second cadence and is not started by this command.
 The scored run uses the registered integration; the CLI never overrides or
@@ -95,6 +95,63 @@ error, never silently treated as the requested scored call.
 `wall_clock` is the **three-minute total call budget**, not the timeout of a
 single clinic request. Increasing a request timeout does not extend the call.
 Local API receipts and completed HTTP checks do not prove that a case passed.
+
+### Opt-in score coordinator
+
+The coordinator is separate from the voice server. It is not enabled by a
+build, commit, server startup or configuration check. Start it only with the
+team's explicit authorization to spend scored and practice calls:
+
+```sh
+# Read-only status; this is also the default when no command is supplied:
+npm run prosper:auto -- status
+
+# Keep this foreground command running in its own terminal:
+npm run prosper:auto -- run
+```
+
+It selects an open, scored problem below four credited passes, preferring the
+highest published weight and then problem number. It reads authoritative team
+credits and eligibility, waits for any existing run, checks local voice health,
+and observes the global five-minute scored / thirty-second practice cooldowns.
+The five-minute rule replaced the earlier twelve-minute setting during
+19 September. The registered endpoint, headers and voice model are never changed.
+Once all currently open problems are capped, it waits for new published problems.
+The public freeze flag or the published `2026-09-20T04:00:00Z` deadline stops
+further admissions; remote cancellation and team withdrawal also pause it.
+
+A failed or unresolved scored result queues every public case in that problem,
+one at a time. After the batch, the process **exits for review**, leaving
+`.local/score-automation/review.json` with run/call IDs, public case IDs and
+verdicts. It does not guess a private expected answer, patch code or deploy by
+itself. An assistant or operator must analyze the private local recordings,
+make only evidence-backed changes, and deploy only with no active calls/runs.
+If no local bug is established, preserve the voice agent and record that
+uncertainty. Explicit review approval resumes the same category if it still
+needs credits:
+
+```sh
+npm run prosper:auto -- resume --failure-run RUN_ID --revision COMMIT_SHA --outcome fix_deployed
+# Or, after an actual review found no justified local change:
+npm run prosper:auto -- resume --failure-run RUN_ID --revision COMMIT_SHA --outcome no_local_change
+```
+
+This tool additionally needs a legitimately authorized dashboard session in
+`.local/prosper-dashboard-session.json` (owned regular file, mode `0600`).
+It holds `origin`, `team_id`, `cookie` and `created_at`, **not a password**.
+Dashboard access supplies published case IDs, progress and eligibility, while
+the team API key admits runs. Both credentials must identify the same team.
+Expired authorization pauses operation; it never becomes zero credits or
+silently reauthenticates. Never commit or print the session file.
+
+Private atomic checkpoints, admission journals and a single-owner lease live
+under `.local/score-automation/`. Restarting `run` monitors a confirmed existing
+admission rather than repeating it. A POST with uncertain delivery remains
+blocked for explicit reconciliation against the remote run list. Never delete
+its journal just to unblock another POST. An existing lease is not stolen:
+verify the recorded process before recovering a genuinely stale lease.
+Ctrl+C stops the coordinator, **not** an already admitted remote run. A CLI
+background process remains attached to that CLI session; this is not a service.
 
 ## Booking safeguards
 
@@ -231,6 +288,13 @@ Precedence is shell environment, then `.env.local`, then `.env.lang`.
 A key from `.env.lang` is not borrowed for a different overridden Azure endpoint.
 Both files are ignored by Git. The existing AI Gateway key is left untouched
 and is not used.
+
+`.env.example` is a template with placeholders, not a backup of a working
+installation. Do not copy it over an existing `.env.local`. A private
+`.env.local.save` can hold a recovery copy (mode `0600`); neither that backup nor
+an editor's `env.local.save` is loaded by the app. The leading dot matters:
+edit `.env.local` for Prosper, WebSocket authentication and local overrides,
+and `.env.lang` for the inherited Azure settings. Never commit either file.
 
 Generate a private token for our WebSocket endpoint:
 

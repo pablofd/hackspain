@@ -34,6 +34,7 @@ code. Use synthetic fixtures and normal API lookups instead.
 | `src/azure-live.ts`, `src/live-transcript.ts` | Isolated experimental GPT-Live connection, Responses delegation and conservative fragment-based confirmation guards. |
 | `src/voice-provider.ts` | Explicit connector selection and independent model/gain profiles; no automatic fallback. |
 | `src/prosper-runs.ts`, `scripts/prosper-runs.ts` | Explicit problem-specific scored admission, read-only console monitoring and sanitized private run snapshots. |
+| `src/prosper-dashboard.ts`, `src/score-automation*.ts`, `scripts/prosper-auto.ts` | Opt-in score selection, protected dashboard reads, persistent single-owner admission and public diagnostic batches with an explicit review barrier. |
 | `src/receptionist.ts` | Runtime instructions, tool schemas, verified patients, slots, proposals, confirmations and outcomes. |
 | `src/prosper.ts`, `src/prosper-types.ts` | Authenticated clinic/submission requests, runtime schemas, receipts and normalization. |
 | `src/scheduling.ts` | Deterministic Madrid date phrases, date windows, age, closures and site openings. |
@@ -70,9 +71,17 @@ code. Use synthetic fixtures and normal API lookups instead.
   `npm run prosper:score -- --problem ID` requests one private scored call;
   the old Run All batch command is no longer supported. Read-only
   `npm run prosper -- list|status|watch` never admits a run. Honor the single
-  queued/active team slot and global 12-minute scored cooldown after completion.
+  queued/active team slot and global 5-minute scored cooldown after completion.
   A lost admission response is uncertain: inspect the run list, never
   automatically repeat the POST. Stopping a watcher does not cancel its run.
+- `npm run prosper:auto -- run` is separately opt-in and admits real calls.
+  Its dashboard session must remain private (`0600`) and match the API key's team.
+  On a scored failure, finish the whole public category before reviewing the
+  local evidence. The coordinator exits at `review_required`; it does not
+  autonomously modify or deploy the voice agent. Resume only with the matching
+  failure ID and an explicit reviewed/deployed revision, or a justified
+  `no_local_change` decision. Preserve uncertain admission journals and do not
+  steal another coordinator's lease or adopt/cancel external runs.
 - Before restarting the active server, check `/healthz` and wait for calls to
   finish. Building `dist/` does not reload an already-running `npm start`.
   Preserve the tunnel and token; do not reset unrelated VM processes.
@@ -134,7 +143,9 @@ run results; do not recompute or mislabel them as the current scoring rule.
   problem. A new failure cannot remove already banked points.
   Public practice never scores. Public answers move with the day's date anchor.
 - Problems open progressively; one scored run targets one open scored problem.
-  Scored cooldown is 12 minutes after completion and global across problems.
+  Scored cooldown is 5 minutes after completion and global across problems;
+  this replaced the earlier 12-minute value during 19 September. Practice has
+  a separate 30-second cooldown, but both lanes share one active team slot.
   The supplied snapshot had problems 1-6 open (2 remains unscored).
 - Maximum three minutes per call. Slow connection or no audible agent audio
   can end it sooner. Streaming silence is not an answer. Do not raise the

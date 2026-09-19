@@ -37,6 +37,8 @@ export const runSchema = z.object({
 });
 export type ProsperRun = z.infer<typeof runSchema>;
 export type ProsperRunCase = z.infer<typeof runCaseSchema>;
+type AdmissionRequest = { lane: "scored"; problem_id: string } |
+  { lane: "practice"; problem_id: string; case_id: string };
 
 export function validateScoredProblem(problemId: string): void {
   if (!idSchema.safeParse(problemId).success) throw new AppError("invalid_problem_id");
@@ -79,9 +81,19 @@ export class ProsperRunsClient {
 
   async startScored(problemId: string, signal: AbortSignal): Promise<{ id: string }> {
     validateScoredProblem(problemId);
+    return this.admit({ lane: "scored", problem_id: problemId }, signal);
+  }
+
+  async startPractice(problemId: string, caseId: string, signal: AbortSignal): Promise<{ id: string }> {
+    if (!idSchema.safeParse(problemId).success) throw new AppError("invalid_problem_id");
+    if (!idSchema.safeParse(caseId).success) throw new AppError("invalid_case_id");
+    return this.admit({ lane: "practice", problem_id: problemId, case_id: caseId }, signal);
+  }
+
+  private async admit(admission: AdmissionRequest, signal: AbortSignal): Promise<{ id: string }> {
     return withSpan("prosper.runs.admit", { "http.request.method": "POST", "url.path": "/api/v1/runs" },
       ROOT_CONTEXT, async () => {
-        const response = await this.send("/api/v1/runs", signal, { lane: "scored", problem_id: problemId });
+        const response = await this.send("/api/v1/runs", signal, admission);
         if (!response.ok) {
           if (response.status >= 500 || response.status === 408) throw new AppError("prosper_run_admission_unknown",
             "Run admission may have succeeded. Inspect the run list before starting another run.");
@@ -104,7 +116,7 @@ export class ProsperRunsClient {
     return this.json(response, signal);
   }
 
-  private async send(path: string, signal: AbortSignal, body?: { lane: "scored"; problem_id: string }): Promise<Response> {
+  private async send(path: string, signal: AbortSignal, body?: AdmissionRequest): Promise<Response> {
     signal.throwIfAborted();
     try {
       return await this.request(new URL(path, this.config.PROSPER_API_BASE_URL), {
@@ -171,7 +183,7 @@ export function scoredRunEligibility(runs: readonly ProsperRun[], now = Date.now
   const active = runs.find((run) => !runFinished(run));
   const finished = runs.flatMap((run) => run.mode === "scored" && run.finished_at !== null
     ? [Date.parse(run.finished_at)] : []);
-  const eligibleAt = finished.length ? Math.max(...finished) + 12 * 60_000 : now;
+  const eligibleAt = finished.length ? Math.max(...finished) + 5 * 60_000 : now;
   return { active, eligibleAt, ready: !active && now >= eligibleAt };
 }
 
@@ -200,7 +212,7 @@ export function formatRun(run: ProsperRun, details = false): string {
   return lines.join("\n");
 }
 
-function secureDirectory(path: string): void {
+export function secureDirectory(path: string): void {
   try { mkdirSync(path, { mode: 0o700 }); }
   catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
