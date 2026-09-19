@@ -19,6 +19,8 @@ const settings = z.object({
   }).default("http://127.0.0.1:7860"),
   DASHBOARD_RECORDS_DIR: z.string().min(1).default(".local/calls"),
   DASHBOARD_HISTORY_DAYS: z.coerce.number().int().min(1).max(30).default(7),
+  DASHBOARD_SIGNALS_ENABLED: z.enum(["true", "false"]).default("true").transform((value) => value === "true"),
+  DASHBOARD_SIGNALS_DEPLOYMENT: z.string().trim().min(1).max(200).regex(/^[A-Za-z0-9_.-]+$/).default("gpt-5.4-mini"),
   AZURE_MONITOR_RESOURCE_ID: optional(resourceId),
   AZURE_MONITOR_WORKSPACE_ID: optional(z.string().uuid()),
   AZURE_SPEECH_RESOURCE_ID: optional(resourceId),

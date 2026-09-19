@@ -7,6 +7,7 @@ import { DashboardAzure, type CallTrace } from "./azure.js";
 import type { DashboardConfig } from "./config.js";
 import { DashboardRecords, type LocalCall } from "./records.js";
 import { cached, observe, requestJson, type Source } from "./source.js";
+import { DashboardSignals } from "./signals.js";
 
 const healthSchema = z.object({
   status: z.enum(["ok", "stopping"]),
@@ -66,11 +67,13 @@ export class DashboardService {
   private readonly prosper: ProsperClient;
   private readonly records: DashboardRecords;
   private readonly azure: DashboardAzure;
+  private readonly signalAnalysis: DashboardSignals;
 
   constructor(
     readonly config: DashboardConfig,
     private readonly request: typeof fetch = fetch,
     azure?: DashboardAzure,
+    signals?: DashboardSignals,
   ) {
     this.prosper = new ProsperClient(config.voice, request);
     this.records = new DashboardRecords(config.DASHBOARD_RECORDS_DIR, config.DASHBOARD_HISTORY_DAYS, [
@@ -78,6 +81,7 @@ export class DashboardService {
       config.voice.AZURE_OPENAI_API_KEY ?? "", config.voice.APPLICATIONINSIGHTS_CONNECTION_STRING ?? "",
     ]);
     this.azure = azure ?? new DashboardAzure(config, request);
+    this.signalAnalysis = signals ?? new DashboardSignals(config, this.records, { request });
   }
 
   private readonly health = cached(2_000, () => observe("voice", () =>
@@ -171,6 +175,7 @@ export class DashboardService {
       calls: [...calls.values()].sort((a, b) =>
         Date.parse(b.startedAt ?? b.receivedAt ?? "") - Date.parse(a.startedAt ?? a.receivedAt ?? "")),
       cloud: { openAi: openAi.data, speech: speech.data },
+      signalAnalysis: this.signalAnalysis.capability(),
       unavailable: ["sentiment", "intent_confidence", "mos", "jitter", "packet_loss", "asr_accuracy",
         "turn_latency", "nps", "clinical_risk", "cost", "audio_playback"],
     };
@@ -178,6 +183,10 @@ export class DashboardService {
 
   async transcript(callId: string) {
     return this.records.transcript(callId);
+  }
+
+  async signals(callId: string) {
+    return this.signalAnalysis.analyze(callId);
   }
 
   async patients(query: unknown) {

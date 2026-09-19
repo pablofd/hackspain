@@ -446,9 +446,17 @@ Escalate rather than schedule these.
   Keep it out of bulk snapshots; bound it to the recent 200-file/history window,
   500 entries and 256 KiB of projected entries. Preserve credential redaction,
   same-origin/no-store controls and text-node rendering. NDJSON/WAV downloads,
-  raw paths/tool bodies and third-party transcript analysis remain prohibited.
+  raw paths/tool bodies and unapproved third-party transcript analysis remain prohibited.
   Cancel pending reads on selection changes/disposal/disconnect and reject
   stale responses; display missing records and source errors without synthesis.
+- At the user's subsequent explicit request, real-mode selected-call signals
+  may use bounded, identifier-filtered text with the existing Azure resource.
+  Keep this separate from the voice path: on-demand authenticated POST only,
+  no tools/clinical writes, no background history sweep, finite input/output/
+  deadline/cache/concurrency limits, and no automatic paid retry loop.
+  Strictly validate caller evidence references; label scores as textual
+  estimates and unknowns as null. Never claim measured emotions, calibrated
+  confidence, audio quality, medical judgments or judge outcomes.
 - Audio recording is separately opt-in via `CALL_AUDIO_RECORDING_ENABLED`.
   Companion WAV files preserve caller input and actually sent agent output on
   separate channels; they cannot redact spoken secrets. Keep them local/private,

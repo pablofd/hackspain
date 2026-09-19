@@ -11,6 +11,7 @@ import { dashboardRequestHost, dashboardRequestOrigin, demoWebSocketPath, type D
 const mime: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".json": "application/json",
+  ".jpg": "image/jpeg",
 };
 const headers = {
   "Cache-Control": "no-store",
@@ -26,10 +27,10 @@ function json(response: ServerResponse, status: number, data: unknown): void {
   response.end(JSON.stringify(data));
 }
 
-async function requireEmptyBody(request: IncomingMessage): Promise<void> {
+async function requireEmptyBody(request: IncomingMessage, code = "dashboard_invalid_demo_request"): Promise<void> {
   if (Number(request.headers["content-length"] ?? 0) !== 0) {
     request.resume();
-    throw new AppError("dashboard_invalid_demo_request");
+    throw new AppError(code);
   }
   await new Promise<void>((resolve, reject) => {
     const cleanup = () => {
@@ -38,7 +39,7 @@ async function requireEmptyBody(request: IncomingMessage): Promise<void> {
       request.removeListener("error", failed);
       request.removeListener("aborted", failed);
     };
-    const failed = () => { cleanup(); reject(new AppError("dashboard_invalid_demo_request")); };
+    const failed = () => { cleanup(); reject(new AppError(code)); };
     const data = (chunk: Buffer) => {
       if (chunk.length) { failed(); request.resume(); }
     };
@@ -52,7 +53,8 @@ async function requireEmptyBody(request: IncomingMessage): Promise<void> {
 
 export function createDashboardServer(
   config: DashboardConfig,
-  service: Pick<DashboardService, "snapshot" | "patients" | "appointments" | "transcript">,
+  service: Pick<DashboardService, "snapshot" | "patients" | "appointments" | "transcript"> &
+    Partial<Pick<DashboardService, "signals">>,
   staticDirectory: string,
   options: { demoCalls?: DashboardDemoCalls } = {},
 ) {
@@ -73,6 +75,23 @@ export function createDashboardServer(
           if (!options.demoCalls) throw new AppError("dashboard_demo_disabled");
           await requireEmptyBody(request);
           json(response, 201, await options.demoCalls.issueTicket(dashboardRequestOrigin(request)));
+          return;
+        }
+        const signals = /^\/api\/dashboard\/calls\/([^/]*)\/signals$/.exec(url.pathname);
+        if (signals && request.method !== "POST") {
+          response.setHeader("Allow", "POST");
+          json(response, 405, { error: "signals_explicit_request_required" });
+          return;
+        }
+        if (request.method === "POST" && signals) {
+          if (url.search) throw new AppError("dashboard_invalid_signals_request");
+          dashboardRequestOrigin(request);
+          await requireEmptyBody(request, "dashboard_invalid_signals_request");
+          let callId: string;
+          try { callId = decodeURIComponent(signals[1] ?? ""); }
+          catch { throw new AppError("dashboard_invalid_call_id"); }
+          if (!service.signals) throw new AppError("signals_disabled");
+          json(response, 200, await service.signals(callId));
           return;
         }
         if (request.method !== "GET") {
@@ -117,7 +136,8 @@ export function createDashboardServer(
         return;
       }
       const relative = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
-      if (relative !== "index.html" && !/^(src|design)\/[A-Za-z0-9_/-]+\.(js|css|svg|json)$/.test(relative)) {
+      if (relative !== "index.html" && !/^(src|design)\/[A-Za-z0-9_/-]+\.(js|css|svg|json)$/.test(relative) &&
+          !/^design\/portraits\/portrait-\d{2}\.jpg$/.test(relative)) {
         json(response, 404, { error: "dashboard_not_found" });
         return;
       }
@@ -143,10 +163,13 @@ export function createDashboardServer(
       log("warn", "dashboard.request_failed", { code });
       if (!response.headersSent) {
         const status = code === "dashboard_transcript_not_found" ? 404 :
+          code === "signals_busy" || code === "signals_cooldown" ? 429 :
           code === "dashboard_demo_origin_denied" ? 403 : code === "dashboard_demo_busy" ? 409 :
           code === "dashboard_invalid_call_id" || code === "dashboard_invalid_transcript_request" ||
           code === "dashboard_invalid_patient_search" || code === "dashboard_invalid_patient_id" ||
-          code === "dashboard_invalid_demo_request" || code === "dashboard_invalid_request_host" ? 400 : 503;
+          code === "dashboard_invalid_demo_request" || code === "dashboard_invalid_request_host" ||
+          code === "dashboard_invalid_signals_request" ? 400 : 503;
+        if (status === 429) response.setHeader("Retry-After", "30");
         json(response, status, { error: code });
       }
       else response.destroy();

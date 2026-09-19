@@ -577,7 +577,8 @@ read-only without copying credentials. Relative `DASHBOARD_RECORDS_DIR` is
 resolved against that checkout. The integration never restarts the agent,
 changes its tunnel/token, creates Azure resources, starts a Prosper call or
 submits a clinic action. Loading the dashboard does not invoke a model. The
-explicit browser voice demo below is the only opt-in inference exception.
+explicit browser voice demo and selected-call signal analysis below are the
+only opt-in inference features.
 
 | Source | Observations | Boundaries |
 | --- | --- | --- |
@@ -664,8 +665,10 @@ the same 200 recent local files and configured history window as the snapshot
 (default seven days, maximum thirty). Source files remain capped at 8 MiB and
 complete event lines at 64 KiB; unfinished appended lines are not invented.
 
-No transcript is added to `/api/dashboard/snapshot`, fetched for every call, or
-sent to Azure/another model for analysis. Known configured credentials are
+No transcript is added to `/api/dashboard/snapshot` or fetched for every call.
+Viewing a transcript alone does not send it to a model; the separately
+requested signal-analysis feature below has its own bounded/redacted input.
+Known configured credentials are
 redacted again when projecting text and item IDs; existing redaction stays in
 place. Synthetic patient statements, including identifiers spoken in them, may
 appear in this explicitly authorized transcript view. Structured directory,
@@ -692,13 +695,60 @@ Additional permission/ACL bits (including those installed by a shared workspace)
 are surfaced as a warning, not mistaken for corrupt data. Review such access
 locally; the writer's private `0700`/`0600` policy is unchanged.
 
-Sentiment, intent confidence, MOS, jitter, packet loss, ASR accuracy, NPS, clinical
-risk and cost remain **unmeasured**, not zero. Explicit visual examples do not
+Emotion, calibrated intent confidence, MOS, jitter, packet loss, ASR accuracy,
+NPS, clinical risk and cost remain **unmeasured**, not zero. Explicit visual examples do not
 turn them into real telemetry. Prompt edits, outbound telephone calls, SMS,
 patient creation and historical WAV playback do not gain clinic write
 implementations. Configuration remains read-only; the browser voice demo is
 the separate, opt-in feature described above.
 See [`dashboard/README.md`](dashboard/README.md) for frontend ownership.
+
+### Real-mode textual signals
+
+At the user's explicit request, opening **Señales** for a selected real call
+can request `POST /api/dashboard/calls/{callId}/signals`. The endpoint requires
+the independent dashboard token, same origin and an empty body; it never accepts
+a client-supplied transcript or model instructions. GET does not trigger
+inference. No analysis runs when the page loads, in visual-demo mode, or for
+every row in the call list.
+
+`DASHBOARD_SIGNALS_ENABLED=true` enables this feature.
+`DASHBOARD_SIGNALS_DEPLOYMENT` defaults to the already deployed `gpt-5.4-mini`
+on the same Azure OpenAI resource; it does not change the voice model. Requests
+use the Responses API, no tools, `store:false`, a 20-second deadline and at most
+2,500 output tokens. This is separate **paid text inference**, not an Azure
+Monitor measurement or a clinic write.
+
+The service uses at most 60 recent transcript entries and 12,000 characters,
+with at most 1,600 characters per entry. Configured credentials and recognizable
+direct identifiers, URLs and name sequences are filtered before inference.
+This reduces identifying data; it is not a guarantee of complete anonymization.
+The authorized input can still describe the conversation's clinical topic.
+No audio, chart notes, demographics or raw tool arguments are added. Coverage
+and truncation are explicit.
+
+The response contains a perceived text tone, nullable calmness/satisfaction/
+confusion indicators, qualitative intent confidence, conversation-pattern
+tags and redacted evidence excerpts. All non-null indicators, intents and
+patterns must cite supplied caller-entry IDs; invented or assistant-only
+evidence is rejected. Outputs are strictly schema-validated and contain no
+free-form medical advice. Transcript text is untrusted data, not instructions.
+
+These are **textual estimates**, not actual emotional measurements, acoustic
+quality, diagnoses, calibrated probabilities, booking authorization or judge
+verdicts. Null means insufficient evidence, never zero. Assistant text is only
+context: generated text and an accepted API receipt cannot establish what the
+caller heard or whether they were satisfied.
+
+Identical redacted input reuses an in-memory cached result. Changed input is
+analyzed no more than once per 30 seconds per call; an older result is explicitly
+marked stale during that interval. Concurrent viewers share the same request,
+only one model analysis runs at a time, and the cache is capped at 128 calls.
+Failures are explicit and are not retried by polling during the cooldown.
+Closing a panel aborts its browser wait; an already issued bounded shared model
+request may finish and populate the cache. No result is fed back into the
+receptionist or used to submit actions. Browser demo conversations are ephemeral
+and do not create the local real-call records this endpoint requires.
 
 Authoritative metric and query contracts:
 

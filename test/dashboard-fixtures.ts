@@ -22,6 +22,7 @@ export function dashboardConfig(directory: string, overrides: NodeJS.ProcessEnv 
     DASHBOARD_TOKEN: "synthetic-dashboard-token-at-least-32-characters",
     DASHBOARD_PORT: "0",
     DASHBOARD_RECORDS_DIR: directory,
+    DASHBOARD_SIGNALS_ENABLED: "false",
     ...overrides,
   });
 }
