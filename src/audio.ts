@@ -23,8 +23,12 @@ export class AudioQueue {
   private playedSamples = 0;
   private readonly interrupted = new Set<string>();
   private readonly finished = new Set<string>();
+  private silenceFramesRemaining = 0;
 
-  constructor(private readonly maxFrames = 1500) {}
+  constructor(
+    private readonly maxFrames = 1500,
+    private readonly silenceTailFrames = 0,
+  ) {}
 
   push(chunk: AudioChunk): void {
     if (this.interrupted.has(chunk.itemId)) return;
@@ -70,7 +74,16 @@ export class AudioQueue {
 
   next(): Buffer | undefined {
     const frame = this.frames.shift();
-    if (!frame) return undefined;
+    if (!frame) {
+      if (this.silenceFramesRemaining > 0 && !this.remainder && this.lastPlayed &&
+          this.finished.has(this.lastPlayed.itemId)) {
+        this.silenceFramesRemaining -= 1;
+        // Downstream VAD needs audio-clock silence; it is not generated content.
+        return Buffer.alloc(160, 0xff);
+      }
+      return undefined;
+    }
+    this.silenceFramesRemaining = this.silenceTailFrames;
     this.playedSamples = this.lastPlayed?.itemId === frame.itemId &&
       this.lastPlayed.contentIndex === frame.contentIndex
       ? this.playedSamples + frame.samples
@@ -98,6 +111,7 @@ export class AudioQueue {
     this.remainder = undefined;
     this.lastPlayed = undefined;
     this.playedSamples = 0;
+    this.silenceFramesRemaining = 0;
     return played;
   }
 }

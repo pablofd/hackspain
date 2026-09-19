@@ -34,6 +34,63 @@ test("audio queue is bounded", () => {
   assert.throws(() => queue.push({ audio: Buffer.alloc(320), itemId: "item", contentIndex: 0 }));
 });
 
+test("completed speech gets exactly 1200 ms of paced endpointing silence, never an endless idle stream", () => {
+  const queue = new AudioQueue(1500, 60);
+  assert.equal(queue.next(), undefined);
+  queue.push({ audio: Buffer.alloc(320, 0x80), itemId: "complete", contentIndex: 0 });
+  queue.finish("complete");
+  assert.deepEqual(queue.next(), Buffer.alloc(160, 0x80));
+  assert.deepEqual(queue.next(), Buffer.alloc(160, 0x80));
+  for (let frame = 0; frame < 60; frame += 1) {
+    assert.deepEqual(queue.next(), Buffer.alloc(160, 0xff));
+  }
+  assert.equal(queue.next(), undefined);
+  assert.equal(queue.next(), undefined);
+  assert.equal(queue.interrupt(), undefined, "Transport silence must not extend provider audio truncation");
+});
+
+test("endpointing silence waits for audio.done rather than ending a temporarily empty stream", () => {
+  const queue = new AudioQueue(1500, 60);
+  queue.push({ audio: Buffer.alloc(160, 0x80), itemId: "streaming", contentIndex: 0 });
+  queue.next();
+  assert.equal(queue.next(), undefined);
+  queue.push({ audio: Buffer.alloc(80, 0x82), itemId: "streaming", contentIndex: 0 });
+  assert.equal(queue.next(), undefined);
+  queue.finish("streaming");
+  const tail = queue.next();
+  assert.deepEqual(tail?.subarray(0, 80), Buffer.alloc(80, 0x82));
+  assert.deepEqual(tail?.subarray(80), Buffer.alloc(80, 0xff));
+  assert.deepEqual(queue.next(), Buffer.alloc(160, 0xff));
+});
+
+test("new speech bypasses an old silence tail and interruption drops both speech and padding", () => {
+  const queue = new AudioQueue(1500, 60);
+  queue.push({ audio: Buffer.alloc(160, 0x80), itemId: "first", contentIndex: 0 });
+  queue.finish("first");
+  queue.next();
+  assert.deepEqual(queue.next(), Buffer.alloc(160, 0xff));
+  queue.push({ audio: Buffer.alloc(320, 0x82), itemId: "second", contentIndex: 0 });
+  queue.finish("second");
+  assert.deepEqual(queue.next(), Buffer.alloc(160, 0x82));
+  assert.deepEqual(queue.interrupt(), { itemId: "second", contentIndex: 0, audioEndMs: 20 });
+  assert.equal(queue.next(), undefined);
+  queue.finish("second");
+  assert.equal(queue.next(), undefined);
+});
+
+test("interrupting a completed silence tail does not truncate or resurrect already played content", () => {
+  const queue = new AudioQueue(1500, 60);
+  queue.push({ audio: Buffer.alloc(160, 0x80), itemId: "first", contentIndex: 0 });
+  queue.finish("first");
+  queue.next();
+  queue.next();
+  assert.equal(queue.interrupt(), undefined);
+  assert.equal(queue.next(), undefined);
+  queue.push({ audio: Buffer.alloc(160, 0x82), itemId: "second", contentIndex: 0 });
+  assert.deepEqual(queue.next(), Buffer.alloc(160, 0x82));
+  assert.equal(queue.next(), undefined);
+});
+
 test("switching items pads the previous tail without mixing their samples", () => {
   const queue = new AudioQueue();
   queue.push({ audio: Buffer.alloc(81, 0x80), itemId: "first", contentIndex: 0 });

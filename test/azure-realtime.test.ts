@@ -104,6 +104,7 @@ function harness(t: TestContext, options: {
   getToken?: AzureRealtimeDependencies["getToken"];
   request?: typeof fetch;
   maxFrames?: number;
+  onRecord?: (event: CallRecordEvent) => void;
 } = {}) {
   const config = parseConfig({
     AZURE_OPENAI_ENDPOINT: "https://offline.openai.azure.com",
@@ -149,7 +150,7 @@ function harness(t: TestContext, options: {
     onInterrupt: () => queue.interrupt(),
     onFailure: (error) => failures.push(error),
     onTurnDone: () => { completed += 1; },
-    onRecord: (event) => records.push(event),
+    onRecord: (event) => { records.push(event); options.onRecord?.(event); },
   });
   void connecting.catch(() => {});
   t.after(async () => {
@@ -531,10 +532,12 @@ test("audio output overflow fails rather than allowing an unbounded playback que
   assert.equal(h.queue.next(), undefined);
 });
 
-test("close waits for confirmed POSTs already in flight and never starts queued actions or lookups", async (t) => {
+test("close waits for confirmed POSTs already in flight and never starts queued actions or lookups", { timeout: 5000 }, async (t) => {
   const submitted = Promise.withResolvers<Response>();
+  const started = Promise.withResolvers<void>();
   const h = harness(t, { request: async (_input, init) => {
     assert.equal(init?.method, "POST");
+    started.resolve();
     return submitted.promise;
   } });
   const session = await h.connect();
@@ -548,7 +551,7 @@ test("close waits for confirmed POSTs already in flight and never starts queued 
   });
   h.socket.tool("outcome", "queued-lookup", "get_clinic", {});
   h.socket.done("outcome");
-  await settle();
+  await started.promise;
   assert.equal(h.requests.length, 1);
   assert.ok(h.records.some((event) => event.type === "action" && event.stage === "confirmed"));
   const pendingSignal = h.requests[0]?.init?.signal;
@@ -573,6 +576,63 @@ test("close waits for confirmed POSTs already in flight and never starts queued 
   assert.deepEqual(h.socket.outputs(), []);
   assert.equal(h.socket.events("response.create").length, 1);
   assert.equal(h.completed(), 0);
+  assert.deepEqual(h.failures, []);
+});
+
+test("a registration request cannot become a patient-not-found refusal through the voice tool dispatcher", { timeout: 5000 }, async (t) => {
+  const reported = Promise.withResolvers<void>();
+  const h = harness(t, {
+    onRecord: (event) => {
+      if (event.type === "tool" && event.name === "report_outcome") reported.resolve();
+    },
+  });
+  const session = await h.connect();
+  session.sendText("Please look up the existing patient.");
+  h.socket.created("lookup");
+  h.socket.tool("lookup", "find", "find_patient", {
+    name: "Luz Ejemplo Prueba", date_of_birth: "1980-05-10",
+  });
+  h.socket.done("lookup");
+  await settle();
+  h.socket.created("clarification");
+  h.socket.done("clarification");
+  session.sendText("I want to register as a new patient instead.");
+  h.socket.created("outcome");
+  h.socket.tool("outcome", "wrong-refusal", "report_outcome", {
+    action: "NO_ACTION", reason: "patient_not_found",
+  });
+  h.socket.done("outcome");
+  await reported.promise;
+  await settle();
+  assert.equal(h.socket.outputs().find((item) => item.call_id === "wrong-refusal")?.output.error,
+    "outcome_request_unresolved");
+  assert.equal(h.requests.some((request) => request.init?.method === "POST"), false);
+  assert.equal(h.records.some((event) => event.type === "action" && event.stage === "accepted"), false);
+  assert.deepEqual(h.failures, []);
+});
+
+test("a new caller turn invalidates a terminal refusal still waiting for transcript stability", { timeout: 5000 }, async (t) => {
+  const reported = Promise.withResolvers<void>();
+  const h = harness(t, {
+    onRecord: (event) => {
+      if (event.type === "tool" && event.name === "report_outcome") reported.resolve();
+    },
+  });
+  const session = await h.connect();
+  session.sendText("An out-of-scope request to refuse.");
+  h.socket.created("outcome");
+  h.socket.tool("outcome", "stale-refusal", "report_outcome", {
+    action: "NO_ACTION", reason: "out_of_scope",
+  });
+  h.socket.done("outcome");
+  await settle();
+  assert.equal(h.requests.length, 0);
+  h.socket.receive({ type: "input_audio_buffer.speech_started", item_id: "correction" });
+  h.socket.receive({ type: "input_audio_buffer.speech_stopped" });
+  await reported.promise;
+  await settle();
+  assert.equal(h.socket.outputs().find((item) => item.call_id === "stale-refusal")?.output.error, "stale_turn");
+  assert.equal(h.requests.length, 0);
   assert.deepEqual(h.failures, []);
 });
 

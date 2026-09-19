@@ -89,12 +89,13 @@ async function exerciseConcurrentCalls(count: number, recordAudio = false): Prom
         const records = readFileSync(join(directory, filename), "utf8").trim().split("\n");
         const end = z.object({ audio: z.object({
           caller: z.object({ frames: z.number(), samples: z.number(), peakAmplitude: z.number() }),
-          agent: z.object({ frames: z.number(), samples: z.number(), peakAmplitude: z.number() }),
+          agent: z.object({ frames: z.number(), samples: z.number(), peakAmplitude: z.number(), zeroSamples: z.number() }),
         }) }).parse(JSON.parse(records.at(-1) ?? ""));
         assert.equal(end.audio.caller.frames, 1);
-        assert.equal(end.audio.agent.frames, 1);
+        assert.ok(end.audio.agent.frames >= 1);
         assert.equal(end.audio.caller.samples, 160);
-        assert.equal(end.audio.agent.samples, 160);
+        assert.equal(end.audio.agent.samples, end.audio.agent.frames * 160);
+        assert.equal(end.audio.agent.zeroSamples, end.audio.agent.samples - 160);
         assert.equal(end.audio.caller.peakAmplitude, end.audio.agent.peakAmplitude);
       }
     }
@@ -111,6 +112,53 @@ for (const count of [10, 20]) {
 
 test("ten concurrent calls keep independent private audio recordings", { timeout: 10_000 },
   () => exerciseConcurrentCalls(10, true));
+
+test("the wire includes bounded end-of-turn silence after generated speech, not during idle startup", { timeout: 5000 }, async () => {
+  const settings = config();
+  const messages: Buffer[] = [];
+  let speak: (() => void) | undefined;
+  const ready = Promise.withResolvers<void>();
+  const completed = Promise.withResolvers<void>();
+  const server = createVoiceServer(settings, async (call) => {
+    speak = () => {
+      call.onAudio({ audio: Buffer.alloc(320, 0x80), itemId: "synthetic-question", contentIndex: 0 });
+      call.onAudioDone("synthetic-question");
+    };
+    ready.resolve();
+    return { sendAudio() {}, sendText() {}, async close() {} };
+  }, "console");
+  const port = await server.listen();
+  try {
+    const client = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+      headers: { Authorization: `Bearer ${settings.VOICE_ENDPOINT_TOKEN}` },
+    });
+    client.on("message", (raw) => {
+      const packet = parsePacket(String(raw));
+      assert.equal(packet.event, "media");
+      if (packet.event !== "media") return;
+      assert.equal(packet.streamSid, "stream-endpointing");
+      messages.push(decodeAudio(packet.media.payload));
+      if (messages.length === 62) completed.resolve();
+    });
+    await once(client, "open");
+    client.send(JSON.stringify(start("endpointing")));
+    await ready.promise;
+    await delay(60);
+    assert.equal(messages.length, 0);
+    assert.ok(speak);
+    speak();
+    await completed.promise;
+    await delay(80);
+    assert.equal(messages.length, 62);
+    assert.deepEqual(messages.slice(0, 2), [Buffer.alloc(160, 0x80), Buffer.alloc(160, 0x80)]);
+    assert.ok(messages.slice(2).every((frame) => frame.length === 160 && frame.every((sample) => sample === 0xff)));
+    const ended = once(client, "close");
+    client.send(JSON.stringify({ event: "stop", streamSid: "stream-endpointing" }));
+    await ended;
+  } finally {
+    await server.close();
+  }
+});
 
 test("a connection over the configured cap is rejected before starting Azure", { timeout: 5000 }, async () => {
   const settings = config({ MAX_CONCURRENT_CALLS: "1" });

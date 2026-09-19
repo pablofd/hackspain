@@ -144,6 +144,7 @@ export function createAzureVoiceFactory(
         signal: AbortSignal.any([call.signal, operations.signal]),
         allowSubmissions: call.allowSubmissions === true,
         generation: () => generation, record, beforeConfirmation: (turn) => confirmation.review(turn),
+        beforeOutcome: (turn, reason) => confirmation.reviewOutcome(turn, reason),
       });
       const deadline = setTimeout(() => fail(new AppError("azure_session_timeout")), 15_000);
 
