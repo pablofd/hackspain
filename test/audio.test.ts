@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AudioQueue } from "../src/audio.js";
+import { AudioQueue, createMuLawGain } from "../src/audio.js";
+import { decodeMuLaw } from "../src/call-audio.js";
 import { decodeAudio, parsePacket } from "../src/protocol.js";
 
 test("audio is split into exact 20 ms mu-law frames, with a padded final frame", () => {
@@ -18,6 +19,27 @@ test("audio is split into exact 20 ms mu-law frames, with a padded final frame",
   assert.equal(queue.interrupt(), undefined);
 });
 
+test("optional mu-law gain preserves duration, silence and polarity with bounded quantized amplification", () => {
+  const all = Buffer.from(Array.from({ length: 256 }, (_, index) => index));
+  assert.equal(createMuLawGain(0)(all), all);
+  const gained = createMuLawGain(9)(all);
+  assert.equal(gained.length, all.length);
+  assert.equal(gained[0xff], 0xff);
+  assert.equal(gained[0x7f], 0x7f);
+  for (let index = 0; index < 256; index += 1) {
+    const before = decodeMuLaw(index);
+    const after = decodeMuLaw(gained[index]!);
+    assert.equal(Math.sign(after), Math.sign(before));
+    assert.ok(Math.abs(after) >= Math.abs(before));
+    assert.ok(Math.abs(after) <= 32124);
+    if (before && Math.abs(before) < 8000) {
+      assert.ok(Math.abs(20 * Math.log10(Math.abs(after / before)) - 9) < 0.6);
+    }
+  }
+  for (const value of [-1, 13, NaN, Infinity]) {
+    assert.throws(() => createMuLawGain(value), { code: "invalid_output_gain" });
+  }
+});
 test("barge-in drops pending and late audio and reports only playback already sent", () => {
   const queue = new AudioQueue();
   queue.push({ audio: Buffer.alloc(640, 0x80), itemId: "old", contentIndex: 0 });

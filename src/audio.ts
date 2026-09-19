@@ -1,4 +1,21 @@
 import { AppError } from "./errors.js";
+import { decodeMuLaw } from "./call-audio.js";
+
+export function createMuLawGain(gainDb: number): (audio: Buffer) => Buffer {
+  if (!Number.isFinite(gainDb) || gainDb < 0 || gainDb > 12) throw new AppError("invalid_output_gain");
+  if (gainDb === 0) return (audio) => audio;
+  const samples = Array.from({ length: 256 }, (_, value) => decodeMuLaw(value));
+  const factor = 10 ** (gainDb / 20);
+  const mapping = samples.map((sample, value) => {
+    const target = sample * factor;
+    let nearest = value;
+    for (let candidate = 0; candidate < samples.length; candidate += 1) {
+      if (Math.abs(samples[candidate]! - target) < Math.abs(samples[nearest]! - target)) nearest = candidate;
+    }
+    return nearest;
+  });
+  return (audio) => Buffer.from(audio.map((value) => mapping[value]!));
+}
 
 export interface AudioChunk {
   audio: Buffer;

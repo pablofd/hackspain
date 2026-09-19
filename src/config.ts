@@ -30,6 +30,7 @@ const configSchema = z.object({
   PROSPER_API_BASE_URL: httpsOrigin.default("https://hackspain.getprosperapp.com"),
   PROSPER_API_KEY: z.string().min(1),
   VOICE_ENDPOINT_TOKEN: z.string().min(32).regex(/^\S+$/),
+  VOICE_OUTPUT_GAIN_DB: z.coerce.number().min(0).max(12).default(0),
   APPLICATIONINSIGHTS_CONNECTION_STRING: optionalValue,
   OTEL_SERVICE_NAME: z.string().min(1).default("hackspain-cachopo"),
   CALL_RECORDING_ENABLED: z.enum(["true", "false"]).default("true").transform((value) => value === "true"),

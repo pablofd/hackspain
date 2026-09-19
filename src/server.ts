@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { ROOT_CONTEXT, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import WebSocket, { WebSocketServer } from "ws";
-import { AudioQueue } from "./audio.js";
+import { AudioQueue, createMuLawGain } from "./audio.js";
 import { createCallRecordStore } from "./call-records.js";
 import type { VoiceFactory, VoiceSession } from "./azure-realtime.js";
 import type { Config } from "./config.js";
@@ -28,6 +28,7 @@ export function createVoiceServer(
   telemetryMode: "azure" | "console",
   recordStore?: CallRecordStore,
 ) {
+  const outputGain = createMuLawGain(config.VOICE_OUTPUT_GAIN_DB);
   const records = recordStore ?? (config.CALL_RECORDING_ENABLED ? createCallRecordStore({
     directory: resolve(".local/calls"),
     retentionDays: config.CALL_RECORDING_RETENTION_DAYS,
@@ -165,8 +166,9 @@ export function createVoiceServer(
           callDeadline = setTimeout(() => fail(new AppError("call_time_limit")), 180_000);
           playback = setInterval(() => {
             try {
-              const frame = audio.next();
-              if (!frame || client.readyState !== WebSocket.OPEN) return;
+              const queued = audio.next();
+              if (!queued || client.readyState !== WebSocket.OPEN) return;
+              const frame = outputGain(queued);
               if (client.bufferedAmount > 1024 * 1024) throw new AppError("client_backpressure");
               client.send(JSON.stringify({ event: "media", streamSid: streamId, media: {
                 payload: frame.toString("base64"),

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { readEnvironment } from "../src/config.js";
 import { azureRealtimeUrl } from "../src/azure-realtime.js";
@@ -47,4 +48,33 @@ test("audio recording is opt-in and requires the private call-record store", () 
     /CALL_AUDIO_RECORDING_ENABLED/);
   const enabled = config({ CALL_RECORDING_ENABLED: "true", CALL_AUDIO_RECORDING_ENABLED: "true" });
   assert.equal(enabled.CALL_AUDIO_RECORDING_ENABLED, true);
+});
+
+test("output gain is opt-in, bounded and does not change the configured voice protocol", () => {
+  assert.equal(config().VOICE_OUTPUT_GAIN_DB, 0);
+  assert.equal(config({ VOICE_OUTPUT_GAIN_DB: "9" }).VOICE_OUTPUT_GAIN_DB, 9);
+  for (const value of ["-1", "13", "NaN", "Infinity"]) {
+    assert.throws(() => config({ VOICE_OUTPUT_GAIN_DB: value }), /VOICE_OUTPUT_GAIN_DB/);
+  }
+});
+
+test("configuring output gain preserves endpoint credentials and rejects invalid changes", () => {
+  const directory = mkdtempSync(join(tmpdir(), "hackspain-output-gain-"));
+  const path = join(directory, ".env.local");
+  const original = "AZURE_OPENAI_ENDPOINT=https://synthetic.openai.azure.com\nVOICE_ENDPOINT_TOKEN=synthetic-existing-token-unchanged\nPROSPER_API_KEY=synthetic-preserved-key\n";
+  writeFileSync(path, original, { mode: 0o600 });
+  const command = ["--import", import.meta.resolve("tsx"), resolve("scripts/configure-local.ts"), "--output-gain-db"];
+  try {
+    const output = execFileSync(process.execPath, [...command, "9"], { cwd: directory, env: {}, encoding: "utf8" });
+    const contents = readFileSync(path, "utf8");
+    assert.ok(contents.startsWith(original));
+    assert.match(contents, /VOICE_OUTPUT_GAIN_DB="9"/);
+    assert.ok(!output.includes("synthetic-existing-token"));
+    assert.throws(() => execFileSync(process.execPath, [...command, "99"], {
+      cwd: directory, env: {}, stdio: "pipe",
+    }));
+    assert.equal(readFileSync(path, "utf8"), contents);
+  } finally {
+    rmSync(directory, { recursive: true });
+  }
 });

@@ -8,6 +8,7 @@ import { test } from "node:test";
 import WebSocket from "ws";
 import { z } from "zod";
 import { createCallRecordStore } from "../src/call-records.js";
+import { decodeMuLaw } from "../src/call-audio.js";
 import type { VoiceFactory } from "../src/azure-realtime.js";
 import { decodeAudio, parsePacket } from "../src/protocol.js";
 import { createVoiceServer, validAuthorization } from "../src/server.js";
@@ -112,6 +113,45 @@ for (const count of [10, 20]) {
 
 test("ten concurrent calls keep independent private audio recordings", { timeout: 10_000 },
   () => exerciseConcurrentCalls(10, true));
+
+test("optional output gain changes only emitted audio, preserving incoming bytes and frame duration", { timeout: 5000 }, async () => {
+  const settings = config({ VOICE_OUTPUT_GAIN_DB: "9" });
+  const incoming = Buffer.alloc(160, 0xd0);
+  let received: Buffer | undefined;
+  const server = createVoiceServer(settings, async (call) => ({
+    sendAudio(payload) {
+      received = decodeAudio(payload);
+      call.onAudio({ audio: received, itemId: "gain-test", contentIndex: 0 });
+      call.onAudioDone("gain-test");
+    },
+    sendText() {},
+    async close() {},
+  }), "console");
+  const port = await server.listen();
+  try {
+    const client = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+      headers: { Authorization: `Bearer ${settings.VOICE_ENDPOINT_TOKEN}` },
+    });
+    await once(client, "open");
+    const response = once(client, "message");
+    client.send(JSON.stringify(start("gain")));
+    client.send(JSON.stringify({ event: "media", streamSid: "stream-gain", media: { payload: incoming.toString("base64") } }));
+    const [raw] = await response;
+    const packet = parsePacket(String(raw));
+    assert.ok(packet.event === "media");
+    const outgoing = decodeAudio(packet.media.payload);
+    assert.deepEqual(received, incoming);
+    assert.equal(outgoing.length, 160);
+    const before = decodeMuLaw(incoming[0]!);
+    const after = decodeMuLaw(outgoing[0]!);
+    assert.ok(after > before * 2 && after < before * 3.2);
+    const ended = once(client, "close");
+    client.send(JSON.stringify({ event: "stop", streamSid: "stream-gain" }));
+    await ended;
+  } finally {
+    await server.close();
+  }
+});
 
 test("the wire includes exactly four seconds of end-of-turn silence, not an endless idle stream", { timeout: 10000 }, async () => {
   const settings = config();

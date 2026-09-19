@@ -5,7 +5,13 @@ import { readEnvironment } from "../src/config.js";
 import { AppError } from "../src/errors.js";
 
 try {
-  const { values } = parseArgs({ options: { endpoint: { type: "string" }, "record-audio": { type: "boolean" } } });
+  const { values } = parseArgs({ options: {
+    endpoint: { type: "string" }, "record-audio": { type: "boolean" }, "output-gain-db": { type: "string" },
+  } });
+  const outputGain = values["output-gain-db"] === undefined ? undefined : Number(values["output-gain-db"]);
+  if (outputGain !== undefined && (!Number.isFinite(outputGain) || outputGain < 0 || outputGain > 12)) {
+    throw new AppError("invalid_output_gain", "Output gain must be between 0 and 12 dB.");
+  }
   const environment = readEnvironment();
   const endpoint = values.endpoint ?? environment.AZURE_OPENAI_ENDPOINT;
   if (!endpoint) throw new AppError("missing_endpoint", "Use --endpoint https://your-resource.openai.azure.com or configure .env.lang.");
@@ -30,6 +36,7 @@ try {
     set("CALL_RECORDING_ENABLED", "true");
     set("CALL_AUDIO_RECORDING_ENABLED", "true");
   }
+  if (outputGain !== undefined) set("VOICE_OUTPUT_GAIN_DB", String(outputGain));
   writeFileSync(".env.local", contents, { mode: 0o600 });
   chmodSync(".env.local", 0o600);
   if (existsSync(".env.lang")) chmodSync(".env.lang", 0o600);
