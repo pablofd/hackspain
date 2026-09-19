@@ -8,6 +8,7 @@ import { ROOT_CONTEXT } from "@opentelemetry/api";
 import { z } from "zod";
 import { ProsperClient, type Clinic } from "../src/prosper.js";
 import { actionSchema, type Availability, type ProsperAction, type Slot, type Patient } from "../src/prosper-types.js";
+import { AppError } from "../src/errors.js";
 import type { AddressResolver } from "../src/geography.js";
 import { ConfirmationGate, privacyRefusalGuidance, type OutcomeReviewContext } from "../src/confirmation.js";
 import { Receptionist, receptionistInstructions, receptionistTools } from "../src/receptionist.js";
@@ -185,6 +186,33 @@ const bookingSearchSchema = z.object({
   }).nullable(),
   instruction: z.string(),
 });
+
+const nearestBookingSearchSchema = bookingSearchSchema.extend({
+  booking_continuation: z.object({
+    previous_offer_invalidated: z.literal(true),
+    prepare_action: z.object({ request: z.object({
+      action: z.literal("BOOK"), patient_id: z.string(), slot_id: z.string(), policy_id: z.string(),
+    }) }).nullable(),
+  }).optional(),
+});
+const originCandidatesSchema = z.object({
+  status: z.literal("needs_clarification"), reason: z.string(), truncated: z.boolean(),
+  candidates: z.array(z.object({
+    candidate_id: z.string(), label: z.string(),
+    selection_arguments: z.object({ address: z.string(), candidate_id: z.string() }),
+  })),
+  instruction: z.string(),
+});
+const syntheticOriginAddress = "C/ del Ejemplo, 12, Madrid";
+const syntheticOriginCandidate = {
+  id: "synthetic-origin", label: "CALLE DEL EJEMPLO 12, Madrid", kind: "portal" as const,
+  latitude: 40.4, longitude: -3.7,
+};
+const syntheticOriginResolver: Pick<AddressResolver, "resolve"> = {
+  async resolve() {
+    return { source: "cartociudad", status: "resolved", truncated: false, candidates: [syntheticOriginCandidate] };
+  },
+};
 
 async function searchBooking(h: ReturnType<typeof harness>, input: Record<string, unknown> = {}) {
   return bookingSearchSchema.parse(await h.execute("search_availability", {
@@ -1886,6 +1914,283 @@ test("Nearest Site skips a closer site that cannot serve the request and uses th
   assert.ok(!h.requests.some((url) => url.searchParams.get("location_id") === "far"));
 });
 
+test("origin selection arguments preserve the original query and distinguish edited addresses from missing candidates", async () => {
+  const queries: string[] = [];
+  const h = harness({ addressResolver: { async resolve(address) {
+    queries.push(address);
+    return { source: "cartociudad", status: "needs_clarification", reason: "ambiguous", truncated: true,
+      candidates: [syntheticOriginCandidate, {
+        ...syntheticOriginCandidate, id: "synthetic-other", label: "CALLE DEL EJEMPLO 14, Madrid",
+      }] };
+  } } });
+  const result = originCandidatesSchema.parse(await h.execute("locate_origin", { address: syntheticOriginAddress }));
+  const selected = result.candidates[0]!;
+  assert.deepEqual(selected.selection_arguments, {
+    address: syntheticOriginAddress, candidate_id: selected.candidate_id,
+  });
+  assert.notEqual(selected.label, syntheticOriginAddress);
+  assert.equal(result.reason, "ambiguous");
+  assert.equal(result.truncated, true);
+  assert.match(result.instruction, /selection_arguments.*unchanged/i);
+  assert.deepEqual(h.records.at(-1), {
+    type: "tool", name: "locate_origin", status: "ok",
+    details: { origin_resolved: false, candidate_count: 2, candidates_truncated: true },
+  });
+  await assert.rejects(h.execute("locate_origin", {
+    ...selected.selection_arguments, address: selected.label,
+  }), { code: "address_candidate_address_mismatch", message: /selection_arguments.*omit candidate_id/i });
+  assert.deepEqual(z.object({ details: z.unknown() }).parse(h.records.at(-1)).details, {
+    candidate_supplied: true, candidate_available: true, address_matches_candidate: false, candidate_count: 2,
+  });
+  const origin = z.object({ origin_id: z.string() }).parse(
+    await h.execute("locate_origin", selected.selection_arguments),
+  );
+  assert.ok(origin.origin_id);
+  assert.deepEqual(h.records.at(-1), {
+    type: "tool", name: "locate_origin", status: "ok",
+    details: { origin_resolved: true, candidate_count: 1, candidates_truncated: false },
+  });
+  for (const candidate_id of [selected.candidate_id, "address-never-issued"]) {
+    await assert.rejects(h.execute("locate_origin", { address: syntheticOriginAddress, candidate_id }), {
+      code: "address_candidate_not_found", message: /omit candidate_id.*fresh candidates/i,
+    });
+    assert.deepEqual(z.object({ details: z.unknown() }).parse(h.records.at(-1)).details, {
+      candidate_supplied: true, candidate_available: false, address_matches_candidate: false, candidate_count: 0,
+    });
+  }
+  assert.deepEqual(queries, [syntheticOriginAddress]);
+  assert.equal(h.requests.length, 0);
+  assert.equal(h.writes.length, 0);
+  for (const value of [syntheticOriginAddress, selected.label, selected.candidate_id, origin.origin_id]) {
+    assert.ok(!JSON.stringify(h.records).includes(value));
+  }
+});
+
+test("origin selection cannot reuse an earlier shortlist after the public address is corrected", async () => {
+  const h = harness({ addressResolver: { async resolve() {
+    return { source: "cartociudad", status: "needs_clarification", reason: "address_mismatch",
+      truncated: false, candidates: [syntheticOriginCandidate] };
+  } } });
+  const first = originCandidatesSchema.parse(await h.execute("locate_origin", { address: syntheticOriginAddress }));
+  const oldSelection = first.candidates[0]!.selection_arguments;
+  const correctedAddress = "Calle del Segundo Ejemplo 8, Madrid";
+  await assert.rejects(h.execute("locate_origin", { ...oldSelection, address: correctedAddress }),
+    { code: "address_candidate_address_mismatch" });
+  const corrected = originCandidatesSchema.parse(await h.execute("locate_origin", { address: correctedAddress }));
+  await assert.rejects(h.execute("locate_origin", oldSelection), { code: "address_candidate_not_found" });
+  assert.deepEqual(z.object({ details: z.unknown() }).parse(h.records.at(-1)).details, {
+    candidate_supplied: true, candidate_available: false, address_matches_candidate: false, candidate_count: 1,
+  });
+  const current = corrected.candidates[0]!.selection_arguments;
+  assert.equal(current.address, correctedAddress);
+  assert.notEqual(current.candidate_id, oldSelection.candidate_id);
+  await h.execute("locate_origin", current);
+  assert.equal(h.writes.length, 0);
+});
+
+test("origin error diagnostics contain only selection booleans and counts, never raw query or argument values", async () => {
+  const h = harness({ addressResolver: { async resolve() {
+    throw new AppError("geocoder_timeout", "UPSTREAM_PRIVATE_SENTINEL");
+  } } });
+  await assert.rejects(h.execute("locate_origin", { address: syntheticOriginAddress }), {
+    code: "geocoder_timeout", message: /temporarily unavailable/,
+  });
+  assert.deepEqual(z.object({ details: z.unknown() }).parse(h.records.at(-1)).details, {
+    candidate_supplied: false, candidate_available: false, address_matches_candidate: false, candidate_count: 0,
+  });
+  for (const args of [
+    '{"BROKEN_JSON_SENTINEL"', "null", '["ARRAY_SENTINEL"]',
+    JSON.stringify({ address: { name: "OBJECT_SENTINEL" }, candidate_id: 1 }),
+    JSON.stringify({
+      address: "ADDRESS_SENTINEL", candidate_id: "CANDIDATE_SENTINEL",
+      name: "NAME_SENTINEL", national_id: "NATIONAL_ID_SENTINEL", phone: "PHONE_SENTINEL",
+    }),
+  ]) {
+    await assert.rejects(h.engine.execute("locate_origin", args, 1), { code: "invalid_tool_arguments" });
+    const { validation_issues, ...diagnostics } = z.object({
+      details: z.object({ validation_issues: z.array(z.unknown()) }).passthrough(),
+    }).parse(h.records.at(-1)).details;
+    assert.ok(validation_issues.length);
+    assert.ok(Object.values(diagnostics).every((value) => typeof value === "boolean" || typeof value === "number"));
+  }
+  assert.ok(!JSON.stringify(h.records).includes("SENTINEL"));
+  assert.ok(!JSON.stringify(h.records).includes(syntheticOriginAddress));
+  assert.equal(h.writes.length, 0);
+});
+
+test("nearest BOOK continuation supplies a fresh preparation after invalidating the old offer, never old consent", async () => {
+  const h = harness({ addressResolver: syntheticOriginResolver });
+  await identify(h);
+  const first = await searchBooking(h);
+  assert.ok(first.booking_proposal);
+  h.nextTurn();
+  const origin = z.object({ origin_id: z.string() }).parse(
+    await h.execute("locate_origin", { address: syntheticOriginAddress }),
+  );
+  const nearest = nearestBookingSearchSchema.parse(await h.execute("search_availability", {
+    patient_id: patient.patient_id, request_id: first.request_id, nearest_origin_id: origin.origin_id,
+  }));
+  assert.equal(nearest.booking_proposal, null);
+  assert.ok(nearest.booking_continuation?.previous_offer_invalidated);
+  const preparation = nearest.booking_continuation.prepare_action;
+  assert.deepEqual(preparation, { request: {
+    action: "BOOK", patient_id: patient.patient_id, slot_id: nearest.slots[0]!.slot_id, policy_id: patient.insurer,
+  } });
+  assert.match(nearest.instruction, /earlier BOOK offer.*invalid/i);
+  assert.match(nearest.instruction, /location\/direction questions.*clinic facts/i);
+  assert.match(nearest.instruction, /do not invent.*routes/i);
+  assert.match(nearest.instruction, /booking_continuation\.prepare_action/);
+  assert.match(nearest.instruction, /new.*confirming caller turn/i);
+  assert.equal(z.object({ actions: z.array(z.unknown()) }).parse(await h.execute("get_call_state", {})).actions.length, 0);
+  assert.equal(h.writes.length, 0);
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: first.booking_proposal.proposal_id, confirmed: true,
+  }), { code: "proposal_not_found" });
+  const fresh = z.object({ proposal_id: z.string() }).parse(await h.execute("prepare_action", preparation));
+  assert.notEqual(fresh.proposal_id, first.booking_proposal.proposal_id);
+  await assert.rejects(h.execute("confirm_action", { proposal_id: fresh.proposal_id, confirmed: true }),
+    { code: "confirmation_requires_new_turn" });
+  assert.equal(h.writes.length, 0);
+  h.nextTurn();
+  await h.execute("confirm_action", { proposal_id: fresh.proposal_id, confirmed: true });
+  assert.deepEqual(h.writes, [{
+    call_id: "real-call-from-start", patient_id: patient.patient_id,
+    provider_id: slot.provider_id, location_id: slot.location_id,
+    appointment_type_id: slot.appointment_type_id, slot: slot.start_time, policy_id: patient.insurer,
+  }]);
+});
+
+test("nearest BOOK continuation reuses explicit prepare_booking and never selects among multiple held policies", async () => {
+  for (const multiplePolicies of [false, true]) {
+    const h = harness({ addressResolver: syntheticOriginResolver,
+      slots: [{ ...slot, payable_with: ["mapfre", "sanitas"] }] });
+    await identify(h);
+    const first = await searchBooking(h);
+    assert.ok(first.booking_proposal);
+    h.nextTurn();
+    const origin = z.object({ origin_id: z.string() }).parse(
+      await h.execute("locate_origin", { address: syntheticOriginAddress }),
+    );
+    const nearest = nearestBookingSearchSchema.parse(await h.execute("search_availability", {
+      patient_id: patient.patient_id, request_id: first.request_id, nearest_origin_id: origin.origin_id,
+      prepare_booking: true, ...(multiplePolicies ? { additional_policy: "sanitas" } : {}),
+    }));
+    assert.ok(nearest.booking_continuation);
+    assert.equal(nearest.booking_continuation.prepare_action, null);
+    if (multiplePolicies) {
+      assert.equal(nearest.booking_proposal, null);
+      assert.match(nearest.instruction, /Multiple eligible held policies require explicit selection/);
+    } else {
+      assert.ok(nearest.booking_proposal);
+      assert.notEqual(nearest.booking_proposal.proposal_id, first.booking_proposal.proposal_id);
+      assert.match(nearest.instruction, /already prepared, NOT submitted/);
+      await assert.rejects(h.execute("confirm_action", {
+        proposal_id: nearest.booking_proposal.proposal_id, confirmed: true,
+      }), { code: "confirmation_requires_new_turn" });
+    }
+    await assert.rejects(h.execute("confirm_action", {
+      proposal_id: first.booking_proposal.proposal_id, confirmed: true,
+    }), { code: "proposal_not_found" });
+    assert.equal(h.writes.length, 0);
+  }
+});
+
+test("nearest continuation does not invent booking intent for read-only, independent or RESCHEDULE searches", async () => {
+  for (const mode of ["read_only", "independent", "reschedule", "later_reschedule"] as const) {
+    const h = harness({
+      addressResolver: syntheticOriginResolver,
+      ...(mode === "later_reschedule" ? { appointments: [laterAppointment], slots: [laterSlot] } : {}),
+    });
+    await identify(h);
+    let requestId: string | undefined;
+    if (mode === "independent") await searchBooking(h);
+    if (mode === "reschedule") requestId = (await proposeScheduling(h, "RESCHEDULE")).request_id;
+    if (mode === "later_reschedule") {
+      await h.execute("list_appointments", { patient_id: patient.patient_id });
+      const first = await searchLater(h);
+      requestId = first.request_id;
+      assert.ok(first.reschedule.prepare_action);
+      await h.execute("prepare_action", first.reschedule.prepare_action);
+    }
+    h.nextTurn();
+    const origin = z.object({ origin_id: z.string() }).parse(
+      await h.execute("locate_origin", { address: syntheticOriginAddress }),
+    );
+    const raw = await h.execute("search_availability", {
+      patient_id: patient.patient_id, specialty_id: slot.specialty_id, nearest_origin_id: origin.origin_id,
+      ...(requestId ? { request_id: requestId } : {}),
+      ...(mode === "independent" ? { new_request: true } : {}),
+      ...(mode === "later_reschedule" ? { relax_constraints: ["location"] } : {}),
+    });
+    const result = nearestBookingSearchSchema.parse(raw);
+    assert.ok(result.slots.length);
+    assert.equal(result.booking_continuation, undefined);
+    assert.equal(result.booking_proposal, null);
+    if (mode === "later_reschedule") assert.equal(laterSearchSchema.parse(raw).reschedule.prepare_action?.request.action, "RESCHEDULE");
+    const state = z.object({ actions: z.array(z.object({ action: z.string() })) }).parse(await h.execute("get_call_state", {}));
+    assert.equal(state.actions.length, mode === "independent" ? 1 : 0);
+    await h.engine.close();
+    assert.equal(h.writes.length, 0);
+  }
+});
+
+test("empty nearest re-search invalidates a BOOK draft without preparing or forcing a terminal action", async () => {
+  let searches = 0;
+  const h = harness({ addressResolver: syntheticOriginResolver,
+    availability: () => offered(++searches === 1 ? [slot] : []) });
+  await identify(h);
+  const first = await searchBooking(h, { date_from: "2026-09-19", date_to: "2026-09-19" });
+  assert.ok(first.booking_proposal);
+  h.nextTurn();
+  const origin = z.object({ origin_id: z.string() }).parse(
+    await h.execute("locate_origin", { address: syntheticOriginAddress }),
+  );
+  const nearest = nearestBookingSearchSchema.parse(await h.execute("search_availability", {
+    patient_id: patient.patient_id, request_id: first.request_id, nearest_origin_id: origin.origin_id,
+  }));
+  assert.equal(nearest.slots.length, 0);
+  assert.equal(nearest.booking_continuation, undefined);
+  assert.equal(nearest.booking_proposal, null);
+  assert.deepEqual(nearest.no_booking?.reason_candidates, ["no_availability"]);
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: first.booking_proposal.proposal_id, confirmed: true,
+  }), { code: "proposal_not_found" });
+  await h.engine.close();
+  assert.equal(h.writes.length, 0);
+});
+
+test("clinic access questions preserve the nearest offer without re-geocoding or implying confirmation", async () => {
+  let originLookups = 0;
+  const h = harness({ addressResolver: {
+    async resolve() {
+      originLookups += 1;
+      return { source: "cartociudad", status: "resolved", truncated: false, candidates: [syntheticOriginCandidate] };
+    },
+  } });
+  await identify(h);
+  const origin = z.object({ origin_id: z.string() }).parse(
+    await h.execute("locate_origin", { address: syntheticOriginAddress }),
+  );
+  const availability = await searchBooking(h, { nearest_origin_id: origin.origin_id });
+  assert.ok(availability.booking_proposal);
+  h.nextTurn();
+  const information = z.object({
+    locations: z.array(z.object({ id: z.string(), address: z.string() })),
+  }).parse(await h.execute("get_clinic", { section: "locations" }));
+  assert.equal(information.locations[0]?.address, clinic.locations[0]?.address);
+  const state = z.object({ actions: z.array(z.object({ proposal_id: z.string(), status: z.string() })) })
+    .parse(await h.execute("get_call_state", {}));
+  assert.ok(state.actions.some((action) =>
+    action.proposal_id === availability.booking_proposal!.proposal_id && action.status === "proposed"));
+  assert.equal(originLookups, 1);
+  assert.equal(h.writes.length, 0);
+  const instructions = receptionistInstructions(new Date("2026-09-19T12:00:00Z"), true);
+  assert.match(instructions, /does not publish entrances, floors or turn-by-turn directions/);
+  assert.match(instructions, /agreement about a location is not booking consent/);
+  h.nextTurn();
+  await h.execute("confirm_action", { proposal_id: availability.booking_proposal.proposal_id, confirmed: true });
+  assert.equal(h.writes.length, 1);
+});
 test("Questions are answered from the catalogue without losing published hours or provider titles", async () => {
   const h = harness();
   const result = z.object({
