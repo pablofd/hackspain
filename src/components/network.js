@@ -1,6 +1,6 @@
 import { el, mount, svg } from "../lib/dom.js";
 import { icon } from "../lib/icons.js";
-import { calls } from "../data/mock.js";
+import { calls, clients, outcomeLabels, riskLabels } from "../data/mock.js";
 
 /** Personas con las que ha hablado maio, agregadas por nombre. */
 export function people() {
@@ -18,12 +18,21 @@ export function networkPanel() {
   const host = el("div", { class: "map-full" });
   const nodes = people();
   let zoom = 1;
+  let selected = null;
   const stage = el("div", { class: "map-full__stage" });
+  const personHost = el("div", { class: "map-person", hidden: true });
   const zoomLabel = el("span", { class: "mono" }, "100%");
 
   function paint() {
-    mount(stage, graph(nodes, zoom));
+    mount(stage, graph(nodes, zoom, selected, pick));
     zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+  }
+
+  function pick(person) {
+    selected = selected?.name === person.name ? null : person;
+    personHost.hidden = !selected;
+    if (selected) mount(personHost, personCard(selected, () => pick(person)));
+    paint();
   }
 
   function setZoom(next) {
@@ -52,10 +61,11 @@ export function networkPanel() {
         el("button", { class: "btn btn--sm", onclick: () => setZoom(1) }, "Ajustar"),
       ),
     ),
-    stage,
+    el("div", { class: "map-full__canvas-wrap" }, stage, personHost),
     el(
       "footer",
       { class: "map-full__legend" },
+      el("span", {}, "Pulsa una persona para ver su ficha"),
       el("span", {}, "Grosor del trazo = número de llamadas"),
       el("span", { class: "text-alert" }, "Aro rojo = hubo escalado a humano"),
       el("span", { class: "ml-auto" }, "Rueda del ratón o + / − para ampliar"),
@@ -71,7 +81,85 @@ export function networkPanel() {
   return host;
 }
 
-function graph(nodes, zoom) {
+/* Ficha rápida de la persona seleccionada en el mapa */
+function personCard(person, onClose) {
+  const client = clients.find((c) => c.name === person.name);
+  const history = calls.filter((c) => c.caller === person.name);
+  const last = history[0];
+
+  return el(
+    "article",
+    { class: "map-person__card" },
+    el(
+      "header",
+      { class: "map-person__head" },
+      el("img", { class: "map-person__photo", src: portrait(person.name), alt: "" }),
+      el(
+        "div",
+        { style: { minWidth: 0 } },
+        el("div", { class: "map-person__name" }, person.name),
+        el("div", { class: "map-person__meta" }, client ? `${client.id} · ${client.insurer}` : "Sin ficha de paciente"),
+      ),
+      el("button", { class: "btn btn--icon btn--ghost ml-auto", onclick: onClose, "aria-label": "Cerrar" }, "✕"),
+    ),
+    el(
+      "dl",
+      { class: "kv" },
+      el("dt", {}, "Teléfono"),
+      el("dd", { class: "mono" }, client?.phone || last?.phone || "—"),
+      el("dt", {}, "Conversaciones"),
+      el("dd", {}, `${person.count} con maio`),
+      el("dt", {}, "Última"),
+      el("dd", {}, last ? `${last.reason} · ${last.time}` : "—"),
+      el("dt", {}, "Próxima cita"),
+      el("dd", {}, client?.nextAppt || "Sin cita registrada"),
+    ),
+    client &&
+      el(
+        "div",
+        { class: "row row--wrap", style: { marginTop: "12px" } },
+        ...client.tags.map((t) => el("span", { class: "chip" }, t)),
+        pill(riskLabels[client.risk].text, riskLabels[client.risk].pill.replace("pill--", "")),
+      ),
+    history.length &&
+      el(
+        "div",
+        { class: "map-person__history" },
+        el("div", { class: "section-title" }, "Historial"),
+        ...history.slice(0, 3).map((h) =>
+          el(
+            "div",
+            { class: "map-person__row" },
+            el("span", { class: "truncate" }, h.reason),
+            el("span", { class: "map-person__tag" }, outcomeLabels[h.outcome].text),
+          ),
+        ),
+      ),
+    el(
+      "button",
+      {
+        class: "btn btn--primary btn--sm",
+        style: { marginTop: "14px", width: "100%" },
+        onclick: () => {
+          location.hash = `#/clientes/${encodeURIComponent(client?.id || person.name)}`;
+        },
+      },
+      "Ver más en Clientes",
+    ),
+  );
+}
+
+function pill(text, variant) {
+  return el("span", { class: `pill pill--${variant}` }, text);
+}
+
+function portrait(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) % 70;
+  return `https://i.pravatar.cc/160?img=${hash + 1}`;
+}
+
+function graph(nodes, zoom, selected, onSelect) {
   const w = 1200;
   const h = 760;
   const cx = w / 2;
@@ -88,20 +176,20 @@ function graph(nodes, zoom) {
       const angle = -Math.PI / 2 + phase + (i / list.length) * Math.PI * 2;
       const x = cx + Math.cos(angle) * rx;
       const y = cy + Math.sin(angle) * ry;
-      const from = { x: cx + Math.cos(angle) * 62, y: cy + Math.sin(angle) * 62 };
-      const to = { x: x - Math.cos(angle) * 26, y: y - Math.sin(angle) * 26 };
+      const isOn = selected?.name === n.name;
+      // El trazo va de centro a centro: los círculos opacos lo rematan en sus bordes
       const bend = (i % 2 ? 1 : -1) * (18 + (i % 3) * 9);
       const mid = {
-        x: (from.x + to.x) / 2 - Math.sin(angle) * bend,
-        y: (from.y + to.y) / 2 + Math.cos(angle) * bend,
+        x: (cx + x) / 2 - Math.sin(angle) * bend,
+        y: (cy + y) / 2 + Math.cos(angle) * bend,
       };
 
       edges.push(
         svg("path", {
-          d: `M${from.x.toFixed(1)} ${from.y.toFixed(1)} Q${mid.x.toFixed(1)} ${mid.y.toFixed(1)} ${to.x.toFixed(1)} ${to.y.toFixed(1)}`,
+          d: `M${cx} ${cy} Q${mid.x.toFixed(1)} ${mid.y.toFixed(1)} ${x.toFixed(1)} ${y.toFixed(1)}`,
           fill: "none",
-          stroke: "rgba(var(--ink-rgb), 0.26)",
-          "stroke-width": 0.6 + Math.min(n.count, 4) * 0.25,
+          stroke: isOn ? "var(--pitch-black)" : "rgba(var(--ink-rgb), 0.26)",
+          "stroke-width": isOn ? 1.8 : 0.6 + Math.min(n.count, 4) * 0.25,
           "stroke-linecap": "round",
         }),
       );
@@ -112,7 +200,10 @@ function graph(nodes, zoom) {
       dots.push(
         svg(
           "g",
-          {},
+          {
+            class: `map__node${isOn ? " is-on" : ""}`,
+            onclick: () => onSelect?.(n),
+          },
           svg("circle", { cx: x, cy: y, r: 23, fill: "var(--white)" }),
           svg(
             "text",
@@ -125,8 +216,12 @@ function graph(nodes, zoom) {
             cy: y,
             r: 23,
             fill: "none",
-            stroke: n.escalated ? "var(--lipstick-red)" : "rgba(var(--ink-rgb), 0.35)",
-            "stroke-width": n.escalated ? 1.8 : 1,
+            stroke: isOn
+              ? "var(--pitch-black)"
+              : n.escalated
+                ? "var(--lipstick-red)"
+                : "rgba(var(--ink-rgb), 0.35)",
+            "stroke-width": isOn ? 2.4 : n.escalated ? 1.8 : 1,
           }),
           svg("text", { x, y: y + 41, "text-anchor": "middle", class: "map__node-label" }, n.name),
           svg(

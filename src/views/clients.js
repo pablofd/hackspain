@@ -9,9 +9,11 @@ export const meta = {
   sub: "Pacientes, historial de contacto y contexto que usan los agentes",
 };
 
-export function render() {
+export function render(param) {
   let query = "";
-  let selected = clients[0];
+  const wanted = param ? decodeURIComponent(param).toLowerCase() : "";
+  let selected =
+    clients.find((c) => c.id.toLowerCase() === wanted || c.name.toLowerCase() === wanted) || clients[0];
   const tbody = el("tbody", {});
   const detailHost = el("div", { class: "stack stack--lg" });
 
@@ -58,6 +60,14 @@ export function render() {
       ),
     );
     if (!rows.length) mount(tbody, el("tr", {}, el("td", { colspan: "7", class: "empty" }, "Sin resultados.")));
+  }
+
+  /* Al llegar desde el mapa, deja visible la fila del paciente enlazado */
+  function revealSelected() {
+    if (!wanted) return;
+    requestAnimationFrame(() => {
+      tbody.querySelector("tr.is-selected")?.scrollIntoView({ block: "center" });
+    });
   }
 
   function renderDetail() {
@@ -132,6 +142,7 @@ export function render() {
 
   renderRows();
   renderDetail();
+  revealSelected();
 
   return el(
     "div",
