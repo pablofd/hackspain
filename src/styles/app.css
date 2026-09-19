@@ -1448,6 +1448,10 @@ table.data .cell-sub {
 .status-host {
   position: sticky;
   top: 0;
+  max-height: calc(100dvh - 150px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .status {
@@ -1512,7 +1516,7 @@ table.data .cell-sub {
 
 .status__body {
   position: relative;
-  padding: var(--sp-4) var(--sp-4) var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
   background-color: var(--parchment);
   background-image:
     linear-gradient(rgba(var(--ink-rgb), 0.045) 1px, transparent 1px),
@@ -1570,7 +1574,7 @@ table.data .cell-sub {
   display: flex;
   align-items: baseline;
   gap: var(--sp-2);
-  padding: 7px 10px;
+  padding: 6px 10px;
   background: rgba(var(--white-rgb), 0.86);
 }
 
@@ -1624,9 +1628,9 @@ table.data .cell-sub {
   display: flex;
   gap: 9px;
   font-size: 12.5px;
-  line-height: 1.5;
+  line-height: 1.45;
   color: var(--text-secondary);
-  margin-bottom: 9px;
+  margin-bottom: 8px;
   animation: note-in var(--dur) var(--ease-out) both;
 }
 
