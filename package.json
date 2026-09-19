@@ -1,0 +1,38 @@
+{
+  "name": "hackspain-cachopo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Prosper voice agent skeleton powered by Azure Foundry Realtime",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "configure": "tsx scripts/configure-local.ts",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "tunnel": ".tools/cloudflared tunnel --no-autoupdate --protocol http2 --url http://127.0.0.1:7860",
+    "tunnel:ngrok": "tsx scripts/tunnel-ngrok.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "check:connections": "tsx scripts/check-connections.ts",
+    "check:jev": "tsx scripts/check-jev.ts"
+  },
+  "dependencies": {
+    "@azure/identity": "^4.13.3",
+    "@azure/monitor-opentelemetry": "^1.20.0",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/resources": "^2.11.0",
+    "@opentelemetry/sdk-trace-node": "^2.11.0",
+    "ws": "^8.21.3",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.5",
+    "@types/ws": "^8.18.1",
+    "ai": "^7.0.107",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}
