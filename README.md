@@ -106,6 +106,11 @@ The tool layer keeps state per call, separate from the language model:
 - `find_patient` requires a unique match on at least two supplied fields before
   allowing patient-specific operations. Full name plus DNI/NIE is sufficient.
   Stored national IDs, phone numbers and birth dates are not returned to the model.
+  A checksum-valid DNI/NIE mistakenly supplied in `phone` is looked up using
+  `national_id`, preserving its complete value rather than stripping the letter.
+  This does not create a second identity factor. Conflicting explicit IDs and
+  invalid check letters are rejected before lookup; ordinary phones and the
+  caller's name still retain their normal verification requirements.
 - `search_availability` searches from the day after the call in Europe/Madrid,
   paginating within the API's 14-day limit. `date_phrase` resolves the published
   English vocabulary and common Spanish/Catalan equivalents deterministically.
@@ -213,6 +218,16 @@ It currently resolves Madrid-province locations; unknown/ambiguous addresses
 require clarification. Candidate coordinates must come from validated geocoder
 responses, never model inference or a city-centre approximation.
 
+A fully matching street, portal, extension and municipality can resolve even
+when the provider also returns phonetic distractors. Only genuinely competing
+exact points need a choice; a different street or house number is never offered
+as a substitute. Generic street abbreviations and leading Spanish articles are
+normalized without erasing internal street-name words. Explicit five-digit
+postal codes, including separated `portal-postcode` and CP forms, are parsed
+as public address components and used with municipality filters. Available
+postcode metadata must agree; DNI, phone, private-unit and transcript-like
+inputs remain blocked before any external request.
+
 Each ambiguous candidate carries `selection_arguments` with the exact original
 public address and its call-local ID. Use that pair only after the caller selects
 the candidate; a corrected address starts a fresh lookup without `candidate_id`.
@@ -224,6 +239,11 @@ malformed data and service limits are explicit errors; a geocoding outage is
 not `no_availability`. The returned `origin_id` is local to the call and can be
 used as `nearest_origin_id` in availability. A closer site without eligible
 appointments is skipped; patient/provider/site/time/plan constraints still apply.
+CartoCiudad's portal bucket can still omit a house even when a larger mixed
+result limit is requested. If no validated exact point is available, the tool
+remains unresolved: it does not use a nearby portal, a street centroid or
+`find?q`'s first fuzzy match. Input-format rejection is reported separately from
+evidence that an address could not be found.
 If a nearest-site re-search invalidates a proposed BOOK, `booking_continuation`
 guides preparation of a fresh matching offer (with arguments only when the held
 policy is unambiguous). Answer location questions briefly and return to the

@@ -6,9 +6,9 @@ import { setImmediate as settle, setTimeout as delay } from "node:timers/promise
 import { test, type TestContext } from "node:test";
 import { ROOT_CONTEXT } from "@opentelemetry/api";
 import { z } from "zod";
+import { AppError } from "../src/errors.js";
 import { ProsperClient, type Clinic } from "../src/prosper.js";
 import { actionSchema, type Availability, type ProsperAction, type Slot, type Patient } from "../src/prosper-types.js";
-import { AppError } from "../src/errors.js";
 import type { AddressResolver } from "../src/geography.js";
 import { ConfirmationGate, privacyRefusalGuidance, type OutcomeReviewContext } from "../src/confirmation.js";
 import { Receptionist, receptionistInstructions, receptionistTools } from "../src/receptionist.js";
@@ -269,6 +269,77 @@ test("unverified identities cannot read appointments or availability and protect
   await h.execute("find_patient", { name: "Ana Prueba Test", national_id: "00000000T" });
   await assert.rejects(h.execute("list_appointments", { patient_id: "PTEST" }));
   assert.equal(h.writes.length, 0);
+});
+
+test("a checksum-valid national identifier misplaced in phone is looked up without losing its letter", async () => {
+  const h = harness({ directory: (url) =>
+    url.searchParams.get("national_id") === patient.national_id && !url.searchParams.has("phone") ? [patient] : [] });
+  const raw = await h.execute("find_patient", { name: "Ana Prueba Test", phone: "1234 5678-z" });
+  const matches = z.object({ matches: z.array(z.object({ verified: z.boolean() })) }).parse(raw).matches;
+  assert.equal(matches[0]?.verified, true);
+  const result = z.object({
+    identifier_input_adjustment: z.literal("national_id_from_phone"),
+    matches: z.array(z.object({ verified: z.boolean() })),
+  }).parse(raw);
+  assert.equal(result.matches[0]?.verified, true);
+  assert.equal(h.requests.length, 1);
+  assert.equal(h.requests[0]?.searchParams.get("national_id"), patient.national_id);
+  assert.equal(h.requests[0]?.searchParams.has("phone"), false);
+  assert.ok(!JSON.stringify(result).includes(patient.national_id));
+  assert.ok(!JSON.stringify(result).includes(patient.phone));
+  await h.execute("list_appointments", { patient_id: patient.patient_id });
+  assert.equal(h.writes.length, 0);
+});
+
+test("misplaced identifier repair never removes an explicit conflicting national identifier", async () => {
+  const h = harness();
+  await assert.rejects(h.execute("find_patient", {
+    name: "Ana Prueba Test", national_id: "00000000T", phone: patient.national_id,
+  }), { code: "conflicting_lookup_identifiers" });
+  assert.equal(h.requests.length, 0);
+  await assert.rejects(h.execute("list_appointments", { patient_id: patient.patient_id }), { code: "patient_unverified" });
+});
+
+test("a national-ID-shaped value with a wrong checksum is never repaired or sent as a phone", async () => {
+  const h = harness();
+  await assert.rejects(h.execute("find_patient", {
+    name: "Ana Prueba Test", phone: "12345678A",
+  }), { code: "invalid_identifier_in_phone" });
+  assert.equal(h.requests.length, 0);
+  assert.equal(h.writes.length, 0);
+});
+
+test("identifier field correction supports NIE but never invents a name or counts a repeated ID twice", async () => {
+  const niePatient = { ...patient, national_id: "X1234567L" };
+  const h = harness({ patients: [niePatient] });
+  const verified = z.object({ matches: z.array(z.object({ verified: z.boolean() })) }).parse(
+    await h.execute("find_patient", { name: "Ana Prueba Test", phone: "x-1234567-l" }),
+  );
+  assert.equal(verified.matches[0]?.verified, true);
+  assert.equal(h.requests[0]?.searchParams.get("national_id"), niePatient.national_id);
+  assert.equal(h.requests[0]?.searchParams.has("phone"), false);
+  const noName = harness();
+  const result = z.object({
+    needs_full_name: z.literal(true), matches: z.array(z.object({ verified: z.boolean() })),
+  }).parse(await noName.execute("find_patient", { national_id: patient.national_id, phone: patient.national_id }));
+  assert.equal(result.matches[0]?.verified, false);
+  await assert.rejects(noName.execute("list_appointments", { patient_id: patient.patient_id }), { code: "patient_unverified" });
+});
+
+test("ordinary phone and explicit national-ID lookups keep their supplied field semantics", async () => {
+  for (const fields of [
+    { phone: "+34 612 345 678" },
+    { national_id: patient.national_id, phone: "+34 612 345 678" },
+    { phone: "12345678" },
+  ]) {
+    const h = harness();
+    const result = z.object({ identifier_input_adjustment: z.string().optional() }).parse(
+      await h.execute("find_patient", { name: "Ana Prueba Test", ...fields }),
+    );
+    assert.equal(result.identifier_input_adjustment, undefined);
+    assert.equal(h.requests[0]?.searchParams.get("phone"), fields.phone);
+    assert.equal(h.requests[0]?.searchParams.get("national_id"), "national_id" in fields ? fields.national_id : null);
+  }
 });
 
 test("an incomplete name asks for the full name rather than cycling a matching identifier", async () => {
@@ -1988,6 +2059,31 @@ test("origin selection cannot reuse an earlier shortlist after the public addres
   assert.equal(h.writes.length, 0);
 });
 
+test("address validation errors distinguish local formatting from an unavailable or nonexistent location", async () => {
+  const h = harness({ addressResolver: {
+    async resolve() { throw new AppError("invalid_public_address"); },
+  } });
+  await assert.rejects(h.execute("locate_origin", { address: syntheticOriginAddress }), {
+    code: "invalid_public_address",
+    message: /No geocoder request was made.*not proof that the street does not exist/,
+  });
+  assert.equal(h.writes.length, 0);
+});
+
+test("an unmatched origin never offers a different street or portal as a substitute", async () => {
+  const h = harness({ addressResolver: {
+    async resolve() {
+      return { source: "cartociudad", status: "needs_clarification", reason: "address_mismatch",
+        truncated: true, candidates: [] };
+    },
+  } });
+  const result = z.object({ candidates: z.array(z.unknown()), instruction: z.string() })
+    .parse(await h.execute("locate_origin", { address: syntheticOriginAddress }));
+  assert.equal(result.candidates.length, 0);
+  assert.match(result.instruction, /Do not suggest a different street or portal/);
+  assert.match(result.instruction, /do not claim a closest site/);
+  assert.equal(h.writes.length, 0);
+});
 test("origin error diagnostics contain only selection booleans and counts, never raw query or argument values", async () => {
   const h = harness({ addressResolver: { async resolve() {
     throw new AppError("geocoder_timeout", "UPSTREAM_PRIVATE_SENTINEL");
