@@ -1,11 +1,16 @@
 import { el, mount, initials } from "../lib/dom.js";
 import { icon } from "../lib/icons.js";
 import { card, stat, emptyState } from "../components/ui.js";
-import { api, snapshot, clients, calls, setPatients, formatDate } from "../data/api.js";
+import { api, setPatients, formatDate } from "../data/api.js";
+import { getPresentation } from "../data/presentation.js";
 
 export const meta = { title: "Clientes", sub: "Consulta autorizada y de solo lectura al directorio de Prosper" };
 
 export function render(param) {
+  const { simulated } = getPresentation();
+  let demoMatches = getPresentation().clients;
+  const currentClients = () => simulated ? demoMatches : getPresentation().clients;
+  const clients = currentClients();
   let selectedId = clients.some((client) => client.id === param) ? param : clients[0]?.id;
   let appointments = null;
   let appointmentStatus = "Selecciona un paciente.";
@@ -16,15 +21,17 @@ export function render(param) {
   const detail = el("div", { class: "stack stack--lg" });
   const stats = el("div", { class: "grid grid--4" });
   const message = el("p", { class: "text-sm secondary", role: "status" },
-    "Busca por nombre o teléfono. No se descarga el directorio completo.");
+    simulated ? "Pacientes simulados · búsqueda local, sin consultar Prosper." : "Busca por nombre o teléfono. No se descarga el directorio completo.");
   const input = el("input", { type: "search", class: "input", placeholder: "Nombre o teléfono",
     minLength: 2, maxLength: 200, autocomplete: "off", "aria-label": "Nombre o teléfono del paciente" });
   const searchButton = el("button", { class: "btn btn--primary", type: "submit" }, "Buscar");
 
   function paint() {
+    const { snapshot, calls } = getPresentation();
+    const clients = currentClients();
     const selected = clients.find((client) => client.id === selectedId);
     mount(stats,
-      stat({ label: "Pacientes en catálogo", value: snapshot.clinic?.patientCount, foot: "Recuento publicado por Prosper" }),
+      stat({ label: "Pacientes en catálogo", value: snapshot.clinic?.patientCount, foot: simulated ? "Escenario visual" : "Recuento publicado por Prosper" }),
       stat({ label: "Coincidencias", value: clients.length, foot: "Última búsqueda explícita" }),
       stat({ label: "Citas próximas seleccionadas", value: appointments?.length, foot: "Solo el paciente de la ficha" }),
       stat({ label: "Riesgo clínico", value: "—", foot: "No evaluado por esta integración" }));
@@ -47,11 +54,11 @@ export function render(param) {
       card({ title: selected.name, sub: `${selected.id} · ${selected.insurer}` },
         el("dl", { class: "kv" },
           el("dt", {}, "Teléfono"), el("dd", { class: "mono" }, selected.phone),
-          el("dt", {}, "Fuente"), el("dd", {}, "Directorio Prosper"),
+          el("dt", {}, "Fuente"), el("dd", {}, simulated ? "Demo visual · paciente simulado" : "Directorio Prosper"),
           el("dt", {}, "Riesgo clínico"), el("dd", {}, "No evaluado")),
         el("p", { class: "card__sub" }, "Esta ficha excluye DNI/NIE, fecha de nacimiento y notas clínicas del directorio."),
         el("button", { class: "btn btn--sm", disabled: true, title: "El backend solo recibe llamadas entrantes" }, "Llamar")),
-      card({ title: "Próximas citas", sub: "EHR de solo lectura; los envíos /submit no modifican esta agenda" },
+      card({ title: "Próximas citas", sub: simulated ? "Agenda simulada, sin citas reales" : "EHR de solo lectura; los envíos /submit no modifican esta agenda" },
         appointments === null ? el("p", { class: "text-sm", role: "status" }, appointmentStatus) :
           appointments.length ? el("div", { class: "timeline" }, ...appointments.map((appointment) =>
             el("div", { class: "timeline__item" },
@@ -76,6 +83,14 @@ export function render(param) {
     appointmentStatus = "Consultando citas…";
     paint();
     if (!selectedId) return;
+    if (simulated) {
+      appointments = [{
+        id: `visual-appointment-${selectedId}`, start: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+        providerId: "visual-provider", locationId: "visual-site",
+      }];
+      paint();
+      return;
+    }
     try {
       const result = await api(`/api/dashboard/patients/${encodeURIComponent(selectedId)}/appointments`, controller.signal);
       if (controller.signal.aborted || disposed) return;
@@ -91,6 +106,14 @@ export function render(param) {
     event.preventDefault();
     const query = input.value.trim();
     if (query.length < 2) { message.textContent = "Escribe al menos dos caracteres."; return; }
+    if (simulated) {
+      demoMatches = getPresentation().clients.filter((client) =>
+        `${client.name} ${client.phone}`.toLocaleLowerCase("es").includes(query.toLocaleLowerCase("es")));
+      selectedId = demoMatches[0]?.id;
+      message.textContent = `${demoMatches.length} pacientes simulados. No se ha consultado Prosper.`;
+      void loadAppointments();
+      return;
+    }
     searchController?.abort();
     const controller = new AbortController();
     searchController = controller;
@@ -101,8 +124,8 @@ export function render(param) {
       const result = await api(`/api/dashboard/patients?${new URLSearchParams({ [parameter]: query })}`, controller.signal);
       if (controller.signal.aborted || disposed) return;
       setPatients(result.patients);
-      selectedId = clients[0]?.id;
-      message.textContent = `${clients.length} coincidencias devueltas por Prosper.`;
+      selectedId = currentClients()[0]?.id;
+      message.textContent = `${currentClients().length} coincidencias devueltas por Prosper.`;
       void loadAppointments();
     } catch (error) {
       if (controller.signal.aborted || disposed) return;

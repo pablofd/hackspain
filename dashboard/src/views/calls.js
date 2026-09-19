@@ -1,17 +1,17 @@
 import { el, mount } from "../lib/dom.js";
 import { icon } from "../lib/icons.js";
-import { card, pill, emptyState } from "../components/ui.js";
+import { card, pill, emptyState, bar, donut } from "../components/ui.js";
 import { networkPanel } from "../components/network.js";
-import { calls, snapshot, outcomeLabels, formatDate, callTranscript } from "../data/api.js";
+import { transcriptPanel } from "../components/transcript.js";
+import { snapshot as liveSnapshot, outcomeLabels, formatDate, callTranscript } from "../data/api.js";
+import { getPresentation, demoSentiments } from "../data/presentation.js";
 import { RANGES, STATES, DEFAULT_RANGE, inRange, matchesState, callQuality } from "../data/insights.js";
 
-export const meta = { title: "Llamadas", sub: "Registros y acciones reales · actualización cada 5 segundos" };
+export const meta = { title: "Llamadas", sub: "Conversaciones, transcripciones y acciones" };
 const number = (value, unit = "") => Number.isFinite(value) ? `${Math.round(value)}${unit}` : "No disponible";
-const transcriptTime = new Intl.DateTimeFormat("es-ES", {
-  timeZone: "Europe/Madrid", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit",
-});
 
 export function render(param, query) {
+  const { snapshot } = getPresentation();
   let filter = STATES.some((item) => item.id === query?.get("estado")) ? query.get("estado") : param === "directo" ? "live" : "all";
   let range = RANGES.some((item) => item.id === query?.get("rango") && item.days <= snapshot.historyDays)
     ? query.get("rango") : snapshot.historyDays < 7 ? "1d" : DEFAULT_RANGE;
@@ -23,9 +23,12 @@ export function render(param, query) {
   let transcriptId;
   let transcriptController;
   let transcript = { status: "idle", data: null };
-  const transcriptBody = el("div", { class: "chat transcript", role: "region", "aria-label": "Transcripción de la llamada" });
+  const transcriptView = transcriptPanel();
   const tbody = el("tbody", {});
-  const hero = el("div", { class: "calls__panel" });
+  const detail = chatCard(togglePanel, transcriptView.element);
+  const summary = el("div", { class: "grid grid--2" });
+  const noSelection = card({}, emptyState("Sin selección", "Selecciona un registro de la lista."));
+  const hero = el("div", { class: "calls__panel" }, noSelection, detail.element, summary);
   const signals = el("aside", { class: "signals", hidden: true });
   const listCard = card({ flush: true }, el("div", { class: "table-wrap" },
     el("table", { class: "data" },
@@ -33,7 +36,9 @@ export function render(param, query) {
       tbody)));
   const grid = el("div", { class: "grid grid--calls" }, listCard, hero, signals);
   const board = el("div", {}, grid);
-  const visible = () => calls.filter((call) => inRange(call, range) && matchesState(call, filter));
+  const search = query?.get("buscar")?.toLocaleLowerCase("es") ?? "";
+  const visible = () => getPresentation().calls.filter((call) => inRange(call, range) && matchesState(call, filter) &&
+    (!search || `${call.id} ${call.caller} ${call.reason}`.toLocaleLowerCase("es").includes(search)));
 
   function togglePanel(kind) {
     panel = panel === kind ? null : kind;
@@ -41,9 +46,7 @@ export function render(param, query) {
   }
 
   function paintTranscript() {
-    const scrollTop = transcriptBody.scrollTop;
-    mount(transcriptBody, ...transcriptContent(transcript));
-    transcriptBody.scrollTop = scrollTop;
+    transcriptView.update({ key: transcriptId, ...transcript, simulated: getPresentation().simulated });
   }
 
   async function loadTranscript(id) {
@@ -51,7 +54,6 @@ export function render(param, query) {
     const changed = id !== transcriptId;
     transcriptController?.abort();
     transcriptId = id;
-    if (changed) transcriptBody.scrollTop = 0;
     if (!id) {
       transcriptController = undefined;
       transcript = { status: "idle", data: null };
@@ -64,14 +66,17 @@ export function render(param, query) {
     transcript = { status: previous ? "refreshing" : "loading", data: previous };
     paintTranscript();
     const current = () => !disposed && !controller.signal.aborted && transcriptController === controller &&
-      transcriptId === id && selectedId === id && !mapOpen && snapshot !== null;
+      transcriptId === id && selectedId === id && !mapOpen && liveSnapshot !== null;
     try {
-      const data = await callTranscript(id, controller.signal);
+      const call = getPresentation().calls.find((item) => item.id === id);
+      const data = call?.simulated
+        ? { callId: id, entries: call.transcript, limited: false, checkedAt: new Date().toISOString() }
+        : await callTranscript(id, controller.signal);
       if (!current()) return;
       transcript = { status: "ok", data };
     } catch (error) {
       if (!current()) return;
-      transcript = { status: "error", data: null, error: error.message };
+      transcript = { status: "error", data: previous, error: error.message };
     } finally {
       if (transcriptController === controller) transcriptController = undefined;
     }
@@ -89,31 +94,35 @@ export function render(param, query) {
       class: call.id === selectedId ? "is-selected" : "",
       onclick: () => { selectedId = call.id; paint(); },
     },
-    el("td", {}, el("div", { class: "cell-main" }, call.caller), el("div", { class: "cell-sub" }, call.phone)),
+    el("td", {}, el("div", { class: "row-flex" }, el("span", { class: "avatar", "aria-hidden": "true" }, call.caller[0]),
+      el("div", {}, el("div", { class: "cell-main" }, call.caller), el("div", { class: "cell-sub" }, call.phone)))),
     el("td", {}, el("div", { class: "cell-main" }, call.reason), el("div", { class: "cell-sub" }, call.missReason)),
     el("td", {}, pill(outcomeLabels[call.outcome].text, outcomeLabels[call.outcome].pill.replace("pill--", ""))),
-    el("td", { class: "muted text-sm" }, "No disponible"), el("td", { class: "mono" }, call.duration),
+    el("td", { class: `text-sm hide-lg ${demoSentiments[call.sentiment]?.cls ?? "muted"}` },
+      call.simulated ? demoSentiments[call.sentiment].text : "—"), el("td", { class: "mono" }, call.duration),
     el("td", { class: "cell-sub" }, call.time))));
     if (!rows.length) mount(tbody, el("tr", {}, el("td", { colspan: 6, class: "empty" }, "Sin registros observados con este filtro.")));
-    if (!selected) mount(hero, card({}, emptyState("Sin selección", "Selecciona un registro de la lista.")));
-    else mount(hero,
-      chatCard(selected, panel, togglePanel, transcriptBody),
-      el("div", { class: "grid grid--2" },
+    noSelection.hidden = Boolean(selected);
+    detail.element.hidden = summary.hidden = !selected;
+    if (selected) {
+      detail.update(selected, panel);
+      mount(summary,
         card({ title: "Resumen del registro", sub: selected.id },
           el("dl", { class: "kv" },
             el("dt", {}, "Resultado observado"), el("dd", {}, outcomeLabels[selected.outcome].text),
             el("dt", {}, "Fuente del recibo"), el("dd", {}, selected.receiptSource ?? "Sin recibo observado"),
             el("dt", {}, "Cierre local"), el("dd", {}, selected.endReason ?? "No observado"),
             el("dt", {}, "Veredicto Prosper"), el("dd", {}, "No consultado"),
-            el("dt", {}, "Sentimiento"), el("dd", {}, "No implementado"))),
+            el("dt", {}, "Sentimiento"), el("dd", {}, selected.simulated ? `${demoSentiments[selected.sentiment].text} · simulado` : "No instrumentado"))),
         card({ title: "Acciones recibidas", sub: "No incluye borradores ni confirmaciones sin recibo" },
           selected.actions.length ? el("div", { class: "timeline" }, ...selected.actions.map((action) =>
             el("div", { class: "timeline__item" }, el("div", { class: "timeline__title" }, action))))
-            : emptyState("Sin recibo observado", "Esto no permite deducir por sí solo un veredicto del juez."))));
+            : emptyState("Sin recibo observado", "No permite deducir un veredicto del juez.")));
+    }
     grid.classList.toggle("is-signals", Boolean(panel && selected));
     listCard.hidden = Boolean(panel && selected);
     signals.hidden = !panel || !selected;
-    mount(signals, ...(panel && selected ? (panel === "metrics" ? metricsPanel(selected) : signalsPanel()) : []));
+    mount(signals, ...(panel && selected ? (panel === "metrics" ? metricsPanel(selected) : signalsPanel(selected)) : []));
     if (mapOpen) {
       const signature = JSON.stringify(rows);
       if (signature !== mapSignature) {
@@ -141,12 +150,15 @@ export function render(param, query) {
     paint();
   } }, icon("relations", "nav__icon"), el("span", {}, mapOpen ? "Ocultar mapa" : "Ver mapa"));
   const root = el("div", { class: "view" },
-    el("p", { class: "card__sub" }, "«Registro abierto» indica un archivo reciente sin cierre, no que el paciente esté hablando. El contador del agente es la referencia de llamadas activas."),
     el("div", { class: "row row--wrap" },
       selector(STATES, filter, (value) => { filter = value; }),
       selector(RANGES.filter((item) => item.days <= snapshot.historyDays), range, (value) => { range = value; }),
       mapButton),
-    board);
+    search ? el("p", { class: "card__sub" }, `Resultados para «${query.get("buscar")}»`) : null,
+    board,
+    el("p", { class: "card__sub" }, getPresentation().simulated
+      ? "Demo visual: conversaciones, pacientes, sentimientos y analítica son ejemplos locales. No representan llamadas reales."
+      : "Un registro abierto no confirma actividad de voz. Un recibo no es un veredicto del juez; sentimiento no instrumentado."));
   root.update = () => {
     paint();
     if (!mapOpen && selectedId) void loadTranscript(selectedId);
@@ -156,74 +168,71 @@ export function render(param, query) {
     transcriptController?.abort();
     transcriptController = undefined;
     transcript = { status: "idle", data: null };
-    mount(transcriptBody);
+    transcriptView.dispose();
   };
   paint();
   return root;
 }
 
-function transcriptContent(state) {
-  const nodes = [
-    el("h3", { class: "text-sm" }, "Transcripción"),
-    el("p", { class: "card__sub" },
-      "Las horas son del registro, no tiempos acústicos exactos. El texto reconocido puede contener errores. El del agente es generado: puede estar interrumpido y no demuestra lo que se oyó."),
-  ];
-  if (state.status === "loading" || state.status === "refreshing") {
-    nodes.push(el("p", { class: "text-sm", role: "status" },
-      state.status === "loading" ? "Cargando transcripción…" : "Actualizando transcripción…"));
-  }
-  if (state.status === "error") {
-    nodes.push(el("div", { role: "status" }, state.error === "dashboard_transcript_not_found"
-      ? emptyState("Registro local no encontrado", "No hay un archivo para esta llamada dentro de la muestra reciente. Un recibo de Prosper no contiene la conversación.")
-      : emptyState("Error al leer la transcripción", `La fuente no está disponible: ${state.error}. No se ha reconstruido ningún texto.`)));
-  }
-  if (!state.data) return nodes;
-  nodes.push(el("p", { class: "card__sub" },
-    `Consulta: ${transcriptTime.format(new Date(state.data.checkedAt))} · solo la llamada seleccionada`));
-  if (state.data.limited) nodes.push(el("p", { class: "text-sm text-alert", role: "status" },
-    "Muestra limitada: se muestran los fragmentos más recientes, no toda la conversación."));
-  if (!state.data.entries.length) nodes.push(emptyState("Sin transcripción registrada",
-    "El archivo no contiene fragmentos de texto completos disponibles."));
-  nodes.push(...state.data.entries.map((entry) => el("article", {
-    class: `chat__row chat__row--${entry.speaker === "user" ? "caller" : "agent"}`,
-    "aria-label": entry.speaker === "user" ? "Interlocutor" : "Agente · texto generado",
-  },
-  el("div", { class: "transcript__message" },
-    el("div", { class: "chat__meta" },
-      el("span", {}, entry.speaker === "user" ? "Interlocutor · texto reconocido" : "Agente · texto generado"),
-      el("time", { dateTime: entry.timestamp, title: entry.timestamp }, transcriptTime.format(new Date(entry.timestamp)))),
-    entry.partial ? el("p", { class: "text-sm secondary" }, "Fragmento parcial · puede estar incompleto o interrumpido") : null,
-    el("div", { class: "chat__bubble transcript__text", dir: "auto" }, entry.text),
-    el("div", { class: "transcript__detail" }, `Ítem: ${entry.itemId}`,
-      entry.startMs === undefined ? null : ` · Intervalo del modelo: ${entry.startMs}–${entry.endMs} ms`)))));
-  return nodes;
-}
-
-function chatCard(call, panel, onToggle, transcriptBody) {
-  return el("section", { class: "chat-card grain" },
+function chatCard(onToggle, transcriptBody) {
+  const name = el("span", { class: "truncate" });
+  const badge = el("span", { class: "pill pill--neutral" });
+  const subtitle = el("div", { class: "chat-card__sub truncate" });
+  const metrics = el("button", { class: "signal-btn", onclick: () => onToggle("metrics") }, icon("reports", "signal-btn__icon"), "Ver analítica");
+  const signals = el("button", { class: "signal-btn", onclick: () => onToggle("signals") },
+    el("span", { class: "signal-btn__eq", "aria-hidden": "true" }, el("i", {}), el("i", {}), el("i", {})), "Señales");
+  const events = el("div", {});
+  const duration = el("span", { class: "mono ml-auto" });
+  const waveform = el("div", { class: "waveform", hidden: true, "aria-hidden": "true", title: "Onda ilustrativa · sin grabación" },
+    ...Array.from({ length: 48 }, (_, index) => el("i", {
+      class: index < 16 ? "is-played" : "", style: { height: `${18 + Math.abs(Math.sin(index * 1.7)) * 70}%` },
+    })));
+  const playbackLabel = el("span", { class: "text-sm muted" }, "Reproducción no disponible");
+  const element = el("section", { class: "chat-card grain" },
     el("div", { class: "chat-card__head" }, icon("maio", "chat-card__logo"),
       el("div", { style: { minWidth: 0 } },
-        el("div", { class: "chat-card__name" }, el("span", { class: "truncate" }, call.caller),
-          pill(call.live ? "Registro abierto" : outcomeLabels[call.outcome].text, "neutral", call.live)),
-        el("div", { class: "chat-card__sub truncate" }, call.time)),
-      el("div", { class: "row ml-auto" },
-        el("button", { class: `signal-btn${panel === "metrics" ? " is-on" : ""}`, onclick: () => onToggle("metrics") },
-          icon("reports", "signal-btn__icon"), "Ver analítica"),
-        el("button", { class: `signal-btn${panel === "signals" ? " is-on" : ""}`, onclick: () => onToggle("signals") }, "Señales"))),
+        el("div", { class: "chat-card__name" }, name, badge), subtitle),
+      el("div", { class: "row ml-auto" }, metrics, signals)),
     transcriptBody,
     el("details", { class: "transcript-events" },
-      el("summary", { class: "text-sm" }, "Eventos técnicos recientes"),
-      ...call.events.slice(-12).map((event) =>
-        el("div", { class: "timeline__item" },
-          el("div", { class: "timeline__time" }, formatDate(event.timestamp)),
-          el("div", { class: "timeline__title" }, event.code)))),
+      el("summary", { class: "text-sm" }, "Eventos técnicos recientes"), events),
     el("div", { class: "player" },
       el("button", { class: "player__btn", disabled: true, title: "Audio privado no expuesto" }, icon("play", "nav__icon")),
-      el("span", { class: "text-sm muted" }, "Reproducción no disponible"),
-      el("span", { class: "mono ml-auto" }, call.duration)));
+      waveform, playbackLabel,
+      duration));
+  return { element, update(call, panel) {
+    name.textContent = call.caller;
+    badge.textContent = `${call.live ? "Registro abierto" : outcomeLabels[call.outcome].text}${call.simulated ? " · demo" : ""}`;
+    subtitle.textContent = `${call.reason} · ${call.time}`;
+    metrics.classList.toggle("is-on", panel === "metrics");
+    signals.classList.toggle("is-on", panel === "signals");
+    duration.textContent = call.duration;
+    waveform.hidden = !call.simulated;
+    playbackLabel.textContent = call.simulated ? "Onda de ejemplo · sin audio" : "Reproducción no disponible";
+    mount(events, ...call.events.slice(-12).map((event) =>
+      el("div", { class: "timeline__item" }, el("div", { class: "timeline__time" }, formatDate(event.timestamp)),
+        el("div", { class: "timeline__title" }, event.code))));
+  } };
 }
 
-export function signalsPanel() {
+export function signalsPanel(call) {
+  if (call?.simulated) {
+    const calm = call.sentiment === "negative" ? 34 : call.sentiment === "positive" ? 88 : 72;
+    const meter = (label, value) => el("div", { class: "list__item" },
+      el("div", { class: "list__body" }, el("div", { class: "list__title" }, label), bar(value)),
+      el("span", { class: "mono" }, `${value}%`));
+    return [
+      el("div", { class: "signals__strip brand-wash" }, "Señales · demo visual, no inferencia"),
+      card({ title: "Estado emocional", sub: "Valores de ejemplo para mostrar el diseño original" },
+        el("div", { class: "gauge-row" }, donut([
+          { value: calm, color: "var(--dusty-denim)" }, { value: 100 - calm, color: "var(--parchment)" },
+        ], { size: 120, center: `${calm}%` }),
+        el("div", { style: { flex: 1 } }, meter("Calma", calm), meter("Satisfacción", calm - 7), meter("Confusión", 22)))),
+      card({ title: "Intenciones", sub: "Ejemplo simulado" }, meter(call.reason, 94), meter("Preferencia horaria", 71), meter("Consultar información", 58)),
+      card({ title: "Patrones de conversación", sub: "Ilustración, no análisis de pacientes reales" },
+        el("div", { class: "chips" }, ...["Busca una cita", "Prefiere la mañana", "Confirma la propuesta"].map((label) => el("span", { class: "signal-chip" }, label)))),
+    ];
+  }
   return [card({ title: "Señales no implementadas" },
     emptyState("Sentimiento e intenciones: no disponibles",
       "El backend no genera emoción, confianza de intención ni recomendaciones. No se inferirán a partir del resultado de la llamada."))];
@@ -231,6 +240,15 @@ export function signalsPanel() {
 
 function metricsPanel(call) {
   const q = callQuality(call);
+  if (call.simulated) return [
+    el("div", { class: "signals__strip brand-wash" }, "Analítica · demo visual, no medición"),
+    ...[
+      ["Latencia de respuesta", [["Primera respuesta", `${q.first} ms`], ["Mediana", `${q.p50} ms`], ["P95", `${q.p95} ms`]]],
+      ["Calidad de la llamada", [["MOS", `${q.mos.toFixed(1)} / 5`], ["Jitter", `${q.jitter} ms`], ["Pérdida", `${q.loss}%`]]],
+      ["Comprensión y turno de palabra", [["Confianza ASR", `${q.asr}%`], ["Interrupciones", q.bargeIns], ["Silencios", q.silence]]],
+    ].map(([title, fields]) => card({ title, sub: "Datos simulados para ilustrar el panel" },
+      el("dl", { class: "kv" }, ...fields.flatMap(([label, value]) => [el("dt", {}, label), el("dd", { class: "mono" }, String(value))])))),
+  ];
   const trace = call.technical.trace;
   return [
     card({ title: "Respuesta del backend", sub: "Duración de spans chat en Application Insights; no tiempo desde que calla el paciente" },

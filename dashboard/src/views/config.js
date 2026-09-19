@@ -3,7 +3,7 @@ import { card, pill, emptyState } from "../components/ui.js";
 import { sourcesCard } from "../components/sources.js";
 import { snapshot } from "../data/api.js";
 
-export const meta = { title: "Configuración", sub: "Estado observado del backend · sin cambios desde el dashboard" };
+export const meta = { title: "Configuración", sub: "Estado real del backend · sin cambios desde el dashboard" };
 const tabs = [
   { id: "agente", label: "Agente" }, { id: "instrucciones", label: "Instrucciones" },
   { id: "acciones", label: "Acciones" }, { id: "cumplimiento", label: "Cumplimiento" },

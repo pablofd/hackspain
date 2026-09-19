@@ -82,10 +82,11 @@ export function setPatients(patients) {
   normaliseCalls();
 }
 
-export async function api(path, signal) {
+export async function api(path, signal, method = "GET") {
   if (!credential) throw new Error("dashboard_unauthorized");
   const current = connection;
   const response = await fetch(path, {
+    method,
     headers: { Authorization: `Bearer ${credential}` },
     signal: AbortSignal.any([AbortSignal.timeout(20_000), ...(signal ? [signal] : [])]),
     cache: "no-store", redirect: "error",
@@ -100,13 +101,36 @@ export async function callTranscript(callId, signal) {
   const value = await api(`/api/dashboard/calls/${encodeURIComponent(callId)}/transcript`, signal);
   if (!value || value.callId !== callId || !Array.isArray(value.entries) || value.entries.length > 500 ||
       typeof value.limited !== "boolean" || !Number.isFinite(Date.parse(value.checkedAt)) ||
-      value.entries.some((entry) => !entry || !["user", "assistant"].includes(entry.speaker) ||
-        typeof entry.text !== "string" || typeof entry.itemId !== "string" ||
-        typeof entry.timestamp !== "string" || !Number.isFinite(Date.parse(entry.timestamp)) ||
-        (entry.partial !== undefined && typeof entry.partial !== "boolean") ||
-        (entry.startMs === undefined ? entry.endMs !== undefined :
-          !Number.isFinite(entry.startMs) || !Number.isFinite(entry.endMs) ||
-          entry.startMs < 0 || entry.endMs < entry.startMs))) throw new Error("dashboard_invalid_response");
+      value.entries.some((entry) => !validTranscriptEntry(entry))) throw new Error("dashboard_invalid_response");
+  return value;
+}
+
+export function validTranscriptEntry(entry) {
+  return Boolean(entry && ["user", "assistant"].includes(entry.speaker) &&
+    typeof entry.text === "string" && entry.text.length <= 65536 &&
+    typeof entry.itemId === "string" && entry.itemId.length <= 512 &&
+    typeof entry.timestamp === "string" && Number.isFinite(Date.parse(entry.timestamp)) &&
+    (entry.partial === undefined || typeof entry.partial === "boolean") &&
+    (entry.startMs === undefined ? entry.endMs === undefined :
+      Number.isFinite(entry.startMs) && Number.isFinite(entry.endMs) && entry.startMs >= 0 && entry.endMs >= entry.startMs));
+}
+
+export async function createDemoCall(signal) {
+  if (!snapshot?.demoCall?.enabled) throw new Error("dashboard_demo_disabled");
+  let value;
+  try { value = await api("/api/dashboard/demo-call", signal, "POST"); }
+  catch (error) {
+    if (error instanceof TypeError) throw new Error("dashboard_demo_connection_failed");
+    throw error;
+  }
+  if (!value || typeof value.callId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(value.callId) ||
+      typeof value.ticket !== "string" || !/^[A-Za-z0-9_.-]{16,512}$/.test(value.ticket) ||
+      value.websocketPath !== "/api/dashboard/demo-call/ws" || value.maxDurationSeconds !== 180 ||
+      value.submissionsAllowed !== false || value.codec !== "audio/x-mulaw" || value.sampleRate !== 8000 ||
+      value.frameBytes !== 160 || !Array.isArray(value.decodeTable) || value.decodeTable.length !== 256 ||
+      value.decodeTable[255] !== 0 || value.decodeTable.some((sample) => !Number.isInteger(sample) || sample < -32768 || sample > 32767) ||
+      !Number.isFinite(Date.parse(value.expiresAt))) throw new Error("dashboard_demo_invalid_ticket");
+  if (Date.parse(value.expiresAt) <= Date.now()) throw new Error("dashboard_demo_ticket_expired");
   return value;
 }
 

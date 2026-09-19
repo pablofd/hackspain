@@ -44,7 +44,7 @@ code. Use synthetic fixtures and normal API lookups instead.
 | `src/server.ts`, `src/protocol.ts`, `src/audio.ts` | Authenticated `/ws`, authoritative call ID, isolated sessions, bounded queues and interruption playback. |
 | `src/config.ts`, `.env.example` | Configuration without exposing secret values. |
 | `src/call-records.ts`, `src/call-audio.ts`, `src/telemetry.ts` | Private local transcripts/optional WAV recordings versus sanitized operational telemetry. |
-| `src/dashboard/`, `scripts/dashboard.ts`, `dashboard/` | Independent authenticated read-only adapter and imported platform UI; no voice behavior or submission changes. |
+| `src/dashboard/`, `scripts/dashboard.ts`, `dashboard/` | Independent authenticated clinic-read-only adapter, platform UI and opt-in isolated browser voice demo; no production call or submission changes. |
 | `test/` | Offline Node tests with synthetic patients and fake upstream responses. |
 
 - Keep TypeScript strict; use Zod for untrusted tool arguments and API responses.
@@ -77,6 +77,15 @@ code. Use synthetic fixtures and normal API lookups instead.
 - Before restarting the active server, check `/healthz` and wait for calls to
   finish. Building `dist/` does not reload an already-running `npm start`.
   Preserve the tunnel and token; do not reset unrelated VM processes.
+- Browser voice demos must use the independent authenticated dashboard bridge,
+  server-generated `demo-...` IDs, `allowSubmissions: false` and its GET-only
+  Prosper transport. Never expose the production voice token or forward a
+  browser-controlled `start`/call ID to the production `/ws`. Tickets are
+  short-lived, one-use and origin-bound; one demo at a time and three minutes
+  maximum. No model runs on page load and no demo enters real records/scoring.
+  Ordered `clear` is opt-in for browser playback; keep production defaults.
+  Distinguish real observations, explicitly illustrative UI data and paid
+  Azure voice. Do not hide a live source error behind unlabelled sample data.
 - Update **Error history and lessons learned** below for each investigated
   failure. Record evidence, cause, correction, regression and remaining limits.
   Distinguish a local fix, an accepted API receipt and a passing judge verdict.
@@ -468,6 +477,7 @@ problems or promote a synthetic evaluation to a Prosper judge result.
 
 | Problem/type | Observed failure and cause | Correction / regression / status |
 | --- | --- | --- |
+| Browser demo / repeated WebSocket upgrade (offline, 19 Sep) | Admission/reconnect tests exposed an upgrade listener accidentally registered once per HTTP request. A later connection received a second HTTP 401 after its 101 upgrade, causing an invalid WebSocket frame. No production or Azure call was used for this reproducer. | Register upgrade handling once per server. Tests cover repeated/replayed/expired tickets, concurrent admission, origin checks, forged IDs, audio bounds, ordered clear and cleanup. A separate short synthetic Azure greeting loopback then produced both generated voice and recognized input with zero clinic writes, zero real call records and no Prosper run. This is demo transport evidence, not a judge verdict. |
 | Dashboard / requested transcript display (19 Sep) | The metadata-only dashboard intentionally showed a private-transcript placeholder, preventing the user's explicitly requested inspection of synthetic challenge conversations. This was a UI policy choice, not a voice or Prosper failure. | Added a separate authenticated, bounded selected-call transcript projection and safe text view, with credential redaction, partial/generated-text caveats, live refresh and stale-response cancellation. Synthetic API/browser regressions cover auth, unsafe/malformed sources, bounds, XSS text, updates and selection/session races; snapshots remain metadata-only and raw NDJSON/WAV stay private. No inference, submitted action, server restart or judge verdict is involved. |
 | Dashboard metadata / inherited ACLs (19 Sep) | A first read rejected the existing owner-controlled records because the shared workspace adds named ACLs and expands permission-mask bits. The untouched backend's two exact-mode fixtures also fail under that inherited ACL, not because of the integration. | Read only a bounded whitelisted projection, retain owner/no-follow/link checks, surface additional source permissions and never chmod the voice process's files. Synthetic ACL coverage and real metadata reads succeed; the existing 28 recording regressions pass in an isolated fixture directory without inherited ACLs. No recording writer or voice behavior changed. |
 | Dashboard integration / simulated observability (19 Sep) | The uploaded platform generated patients, sentiment, response timings, MOS and ASR scores, and offered controls with no backend implementation. Treating these as telemetry would misrepresent actual calls; a name-based map could also join unrelated patients. | Replaced demo imports with a separately authenticated read-only adapter, exact BOOK patient-ID links, source/error states and explicit unavailable metrics. Raw NDJSON/WAV and structured registration demographics remain private; selected transcript display was subsequently authorized as documented above. No new model inference or clinic writes. Offline projection/authentication/Monitor and synthetic browser coverage; a read-only Azure query returned real audio/token usage, while missing latency samples remain unavailable. No agent change or judge result is claimed. |

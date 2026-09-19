@@ -1,6 +1,9 @@
 import { el, mount } from "./lib/dom.js";
 import { icon } from "./lib/icons.js";
 import { connect, disconnect, refresh, snapshot } from "./data/api.js";
+import { presentation, setPresentation } from "./data/presentation.js";
+import { compactSources } from "./components/sources.js";
+import { demoCallControl } from "./components/demo-call.js";
 import * as home from "./views/home.js";
 import * as calls from "./views/calls.js";
 import * as config from "./views/config.js";
@@ -21,6 +24,10 @@ let sub;
 let status;
 let banner;
 let clinicName;
+let sourceStatus;
+let demoControl;
+let searchInput;
+let modeBar;
 const navLinks = new Map();
 
 function route() {
@@ -31,6 +38,8 @@ function route() {
 
 function renderRoute() {
   if (!snapshot || !content) return;
+  demoControl?.close();
+  sourceStatus?.close();
   view?.dispose?.();
   const { path, param, query } = route();
   const current = ROUTES[path];
@@ -42,18 +51,21 @@ function renderRoute() {
   content.scrollTop = 0;
   navLinks.forEach((link, key) => link.classList.toggle("is-active", key === path));
   document.body.classList.remove("nav-open");
+  document.documentElement.style.setProperty("--scroll-gutter", `${content.offsetWidth - content.clientWidth}px`);
 }
 
 function paintStatus(error) {
   if (!banner) return;
   banner.textContent = error
     ? `Sin actualizar: ${error}. Los datos anteriores no representan el estado en directo.`
-    : `Solo lectura · actualizado ${new Date(snapshot.observedAt).toLocaleTimeString("es-ES")} · recibo de API ≠ veredicto del juez`;
+    : `${presentation === "demo" ? "Demo visual · pacientes, conversaciones y métricas simulados" : "Datos reales · muestra observada, no veredictos del juez"} · ${new Date(snapshot.observedAt).toLocaleTimeString("es-ES")}`;
   banner.classList.toggle("text-alert", Boolean(error));
   status.textContent = error ? "Estado no actualizado" : snapshot.health
-    ? `${snapshot.health.activeCalls} llamadas activas · ${snapshot.health.voiceDeployment}`
+    ? `Agente real · ${snapshot.health.activeCalls} llamadas activas`
     : "Estado del agente no disponible";
   clinicName.textContent = snapshot.clinic?.name ?? "Clínica no disponible";
+  sourceStatus?.update();
+  demoControl?.refresh();
 }
 
 async function poll(currentGeneration) {
@@ -76,6 +88,26 @@ function shell() {
   status = el("p", {});
   clinicName = el("h4", {});
   banner = el("div", { class: "connection-banner", role: "status" });
+  sourceStatus = compactSources();
+  demoControl = demoCallControl();
+  modeBar = el("div", { class: "segmented presentation-switch", role: "group", "aria-label": "Origen de los datos" },
+    ...[["real", "Datos reales"], ["demo", "Demo visual"]].map(([value, label]) =>
+      el("button", { class: presentation === value ? "is-active" : "", "aria-pressed": presentation === value, onclick: () => {
+        if (presentation === value) return;
+        setPresentation(value);
+        modeBar.querySelectorAll("button").forEach((button, index) => {
+          const active = (index === 0 ? "real" : "demo") === value;
+          button.classList.toggle("is-active", active);
+          button.setAttribute("aria-pressed", String(active));
+        });
+        paintStatus();
+        renderRoute();
+      } }, label)));
+  searchInput = el("input", { type: "search", placeholder: "Buscar llamadas", "aria-label": "Buscar llamadas", maxLength: 200 });
+  const search = el("form", { class: "search topbar-search", onsubmit: (event) => {
+    event.preventDefault();
+    location.hash = `#/llamadas?buscar=${encodeURIComponent(searchInput.value.trim())}`;
+  } }, icon("search", "nav__icon"), searchInput, el("kbd", {}, "⌘K"));
   content = el("div", { class: "content", id: "content" });
   navLinks.clear();
   mount(document.getElementById("app"),
@@ -83,13 +115,16 @@ function shell() {
     el("div", { class: "shell" },
       el("aside", { class: "sidebar grain" },
         el("div", { class: "brand" }, icon("maio", "brand__mark"), el("div", { class: "brand__name" }, "maio")),
-        el("nav", { class: "nav" }, el("div", { class: "nav__group" },
-          el("div", { class: "nav__label" }, "Plataforma"),
-          ...Object.entries(ROUTES).map(([path, item]) => {
+        el("nav", { class: "nav" }, ...[
+          ["Plataforma", ["/", "/llamadas", "/clientes"]], ["Ajustes", ["/configuracion"]],
+        ].map(([label, paths]) => el("div", { class: "nav__group" },
+          el("div", { class: "nav__label" }, label),
+          ...paths.map((path) => {
+            const item = ROUTES[path];
             const link = el("a", { class: "nav__item", href: `#${path}` }, icon(item.icon), el("span", {}, item.label));
             navLinks.set(path, link);
             return link;
-          }))),
+          })))),
         el("div", { class: "sidebar__footer grain" },
           clinicName, status,
           el("a", { class: "pill pill--neutral pill--link", href: "#/llamadas/directo" }, "Ver registros abiertos")),
@@ -101,8 +136,9 @@ function shell() {
         el("header", { class: "topbar" },
           el("button", { class: "btn btn--icon btn--ghost nav-toggle", "aria-label": "Abrir menú",
             onclick: () => document.body.classList.toggle("nav-open") }, icon("menu", "nav__icon")),
-          el("div", { class: "topbar__titles" }, title, sub)),
-        banner, content),
+          el("div", { class: "topbar__titles" }, title, sub),
+          el("div", { class: "topbar__actions" }, search, modeBar, demoControl.element)),
+        el("div", { class: "connection-strip" }, banner, sourceStatus.element), content),
       el("div", { class: "scrim", onclick: () => document.body.classList.remove("nav-open") })));
   paintStatus();
   renderRoute();
@@ -112,10 +148,14 @@ function shell() {
 function login() {
   generation += 1;
   clearTimeout(timer);
+  demoControl?.dispose();
+  demoControl = null;
+  sourceStatus = null;
   view?.dispose?.();
   view = null;
   content = null;
   disconnect();
+  setPresentation("real");
   const input = el("input", { class: "input", type: "password", name: "dashboard-token",
     autocomplete: "off", required: true, minLength: 32, placeholder: "DASHBOARD_TOKEN" });
   const message = el("p", { class: "text-sm", role: "status" });
@@ -140,7 +180,12 @@ function login() {
 }
 
 window.addEventListener("hashchange", renderRoute);
+window.addEventListener("pagehide", () => demoControl?.close());
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape") document.body.classList.remove("nav-open");
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && content) {
+    event.preventDefault();
+    searchInput?.focus();
+  }
 });
 login();

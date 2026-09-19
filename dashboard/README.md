@@ -1,8 +1,9 @@
 # maio · Recepción agéntica
 
 Interfaz de **maio**, importada de la rama `platform` (`b5cdcfa`) e integrada
-con el backend Cachopo en modo **solo lectura**. Se conservan el diseño y las
-vistas, pero se retiran los datos simulados y las puntuaciones inventadas.
+con el backend Cachopo en modo **solo lectura para la clínica**. Conserva el
+diseño original, distingue datos reales de una demo visual explícita y añade
+una prueba de voz aislada, sin envíos clínicos.
 
 ## Ejecutar
 
@@ -78,8 +79,9 @@ y respuestas `no-store`:
   en Prosper; solo ID, nombre, teléfono y aseguradora.
 - `GET /api/dashboard/patients/{id}/appointments`: citas próximas del EHR.
 
-No existe proxy genérico, endpoint de escritura ni botón que lance una llamada
-real. Los fallos se muestran; una respuesta vacía no se sustituye por mocks.
+No existe proxy genérico ni escritura en el EHR. El botón opcional de micrófono
+se describe más abajo; no admite llamadas de Prosper. Los fallos se muestran;
+una respuesta vacía no se sustituye automáticamente por mocks.
 Las llamadas se relacionan por el `patient_id` de un BOOK recibido, nunca por
 un parecido de nombres ni por un teléfono compartido. La lista y el mapa
 mantienen los mismos filtros. No se consultan fotografías ni tipografías externas.
@@ -107,11 +109,70 @@ Hay estados distintos de carga, sin transcripción, registro no encontrado y
 error de fuente (`401` sin acceso, `400` ID/consulta inválidos, `404` fuera de la
 muestra local, `503` fallo del registro). Cambiar de selección, abrir el mapa,
 navegar o desconectar cancela las peticiones; las respuestas antiguas no repintan
-otra llamada ni una sesión nueva. No se envía texto a ningún modelo o servicio.
-No se inventan ondas de audio, turnos ni indicadores de que alguien habla.
-Sentimiento, intenciones, MOS, exactitud ASR, personalidad, NPS y riesgo clínico
-no están implementados y se muestran como no disponibles. La configuración del
+otra llamada ni una sesión nueva. La consulta de registros no envía texto a ningún
+modelo o servicio. En **Datos reales** no se inventan ondas, turnos ni indicadores
+de que alguien habla. Sentimiento, intenciones, MOS, exactitud ASR, personalidad,
+NPS y riesgo clínico no se presentan como mediciones reales. La configuración del
 agente continúa exclusivamente en el backend.
+
+El contenedor de transcripción conserva sus nodos entre actualizaciones.
+Si el lector estaba a menos de 40 px del final, sigue los nuevos fragmentos;
+si está leyendo arriba, conserva un ancla visible, incluso al crecer un parcial
+o eliminar entradas antiguas por el límite. Un error de fuente mantiene la
+última lectura con aviso explícito de que está desactualizada. Este mismo
+componente se utiliza en la llamada de micrófono.
+
+## Datos reales y demo visual
+
+El selector de la cabecera es explícito y solo vive en memoria:
+
+- **Datos reales** mantiene las llamadas, recibos, transcripciones y consultas
+  autenticadas existentes. No cambia a datos simulados si falla una API.
+- **Demo visual** usa pacientes, teléfonos, citas, conversaciones, sentimientos,
+  señales, latencias, MOS, ASR, NPS y ondas **locales y simulados**. Las series
+  ilustrativas de volumen, motivos, tendencias y sparklines proceden del diseño
+  original `platform` (`b5cdcfa`); no son métricas del servidor ni veredictos.
+  Los filtros de llamadas/mapa siguen compartiendo el mismo conjunto de ejemplos.
+  La búsqueda de pacientes en este modo es local y no consulta Prosper.
+
+La marca, fuentes del sistema, paleta, sidebar, hero, seis tarjetas KPI, gráficos,
+mapa y jerarquía de chat conservan los estilos originales. Los avisos y fuentes
+se compactan en la cabecera, sin ocultar los errores. El estado de conexión y
+del agente en el sidebar sigue siendo **real**, también en demo visual; la
+configuración muestra expresamente el backend real. No se solicitan avatares,
+fuentes, analítica o códecs a terceros. Los controles sin implementación real,
+como reproducción de grabaciones o edición del agente, continúan deshabilitados.
+
+## Llamada fake con micrófono
+
+Solo aparece cuando el snapshot real publica `demoCall.enabled: true`.
+**La voz usa Azure de pago**: no es audio gratuito ni una grabación simulada.
+El diálogo explica el coste y el máximo de tres minutos antes de iniciar.
+No hay puntuación, admisión de llamadas de Prosper ni envíos clínicos.
+
+Tras pulsar **Iniciar llamada**, se solicita micrófono con cancelación de eco,
+supresión de ruido y audio mono. Solo después de obtenerlo y preparar Web Audio,
+`POST /api/dashboard/demo-call` (sin cuerpo) solicita un ticket con el token del
+dashboard en su cabecera. Se abre el WebSocket del mismo origen usando
+`['maio-demo', ticket]` como subprotocolos: ni el ticket ni el token se ponen en
+la URL o en almacenamiento persistente. El servidor es dueño del ID y la capacidad.
+
+Un AudioWorklet remuestrea la frecuencia real del AudioContext a 8 kHz con filtro
+anti-alias y forma bloques de 160 muestras. La tabla de 256 muestras proporcionada
+por el servidor sirve tanto para decodificar como para codificar por búsqueda
+binaria del vecino más cercano; el silencio usa `0xff`. No se envía audio antes de
+`ready`. Solo se emiten `media` (160 bytes, 20 ms, G.711 mu-law) y `stop`, nunca
+`start`/`connected` de Twilio ni IDs inventados.
+El puente puede adelantar texto o audio de saludo mientras el proveedor termina
+de iniciar. El frontend valida y muestra/reproduce ese contenido sin habilitar
+el micrófono hasta `ready`; recibir un saludo no autoriza enviar audio.
+
+La reproducción usa AudioBuffer a 8 kHz y una cola de hasta dos segundos. `clear`
+detiene el audio actual y pendiente. Colgar, cerrar, navegar, desconectar, caducar
+la sesión, recibir un error o alcanzar el límite libera pistas, worklets, contexto,
+fuentes, temporizadores y WebSocket. Los permisos tardíos se descartan y sus pistas
+se detienen: no reabren una sesión cancelada. Los errores de permiso, capacidad,
+conexión y contrapresión son visibles; no se reintenta automáticamente.
 
 Un recibo de acción no es un pase del juez ni una modificación del EHR.
 Los gráficos usan una muestra limitada y no afirman cobertura histórica completa.
@@ -131,3 +192,15 @@ bajo `.local/`, un navegador local y ningún servicio de pago. Incluyen límites
 redacción, autenticación, texto XSS literal, fragmentos, actualización y carreras
 de selección/desconexión. `npm test` incluye los contratos offline; el navegador se
 ejecuta explícitamente mediante `test:dashboard`.
+
+`test/dashboard-demo.browser.ts` añade micrófono falso de Chromium y
+WebSockets/tickets locales interceptados, sin acceso a Azure. Comprueba frames,
+remuestreo 8/44,1/48 kHz, filtro anti-alias, tabla mu-law, reproducción/clear,
+desconexión, expiración, límites y carreras. `test/dashboard.browser.ts` compara
+geometría y tipografía con una referencia pública de `b5cdcfa` servida solo en
+loopback, además de probar scroll, filtros y separación real/demo.
+Una regresión de navegador usa también el puente nativo con un proveedor de voz
+falso: POST 201, ticket/Origin reales del servidor local, saludo anterior a
+`ready`, captura, reproducción, `clear` y cierre, sin Azure ni grabaciones.
+`DASHBOARD_VISUAL_CAPTURE=1` guarda capturas sintéticas opcionales bajo
+`dashboard/.local/visual-captures/`; no contiene grabaciones o pacientes reales.

@@ -1,6 +1,7 @@
 import { el, mount, svg } from "../lib/dom.js";
 import { icon } from "../lib/icons.js";
-import { calls as allCalls, clients, outcomeLabels, riskLabels } from "../data/api.js";
+import { outcomeLabels, riskLabels } from "../data/api.js";
+import { getPresentation } from "../data/presentation.js";
 import { DEFAULT_RANGE, rangeById, stateLabel } from "../data/insights.js";
 /** Only a patient_id from a BOOK receipt can link separate calls to the same patient. */
 export function people(list) {
@@ -26,7 +27,7 @@ export function people(list) {
   return [...byCaller.values()].sort((a, b) => b.missed - a.missed || b.count - a.count);
 }
 
-export function networkPanel(list = allCalls, opts = {}) {
+export function networkPanel(list = getPresentation().calls, opts = {}) {
   const { state = "all", range = DEFAULT_RANGE } = opts;
   const host = el("div", { class: "map-full" });
   const nodes = people(list);
@@ -262,7 +263,7 @@ function personCard(person, range, onClose) {
 }
 
 function findClient(person, last) {
-  return last?.patientIds.length === 1 ? clients.find((client) => client.id === person.id) : undefined;
+  return last?.patientIds.length === 1 ? getPresentation().clients.find((client) => client.id === person.id) : undefined;
 }
 
 /* Si ya estamos en la ficha destino el hash no cambia, así que forzamos el repintado */

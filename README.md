@@ -538,8 +538,9 @@ backend environment. In an isolated worktree, set `DASHBOARD_ENV_DIR` in that
 private file to the existing backend checkout to reuse its configuration
 read-only without copying credentials. Relative `DASHBOARD_RECORDS_DIR` is
 resolved against that checkout. The integration never restarts the agent,
-changes its tunnel/token, creates Azure resources, invokes a model, starts a
-Prosper call or submits an action.
+changes its tunnel/token, creates Azure resources, starts a Prosper call or
+submits a clinic action. Loading the dashboard does not invoke a model. The
+explicit browser voice demo below is the only opt-in inference exception.
 
 | Source | Observations | Boundaries |
 | --- | --- | --- |
@@ -564,6 +565,48 @@ and is never replaced with demo values. Historical statistics are explicitly a
 bounded observed sample (default seven days, up to 200 local files and 200
 receipts), not a complete population; period-over-period trends are not invented.
 The date ranges use Europe/Madrid calendar days.
+
+### Browser voice demo
+
+The **Llamada fake** control is an isolated browser conversation, not a Prosper
+call. It uses the PC's microphone and the configured Azure voice model, so
+**Azure inference is real and billable**. Microphone permission and an explicit
+click are required; opening the page, looking at example data or issuing an
+unused connection ticket does not start inference.
+
+The authenticated, same-origin `POST /api/dashboard/demo-call` accepts no body.
+It returns a server-owned `demo-...` call ID, a one-use 30-second ticket, codec
+metadata and `/api/dashboard/demo-call/ws`. The WebSocket uses the
+`maio-demo` subprotocol plus that ticket; neither the dashboard token nor the
+voice endpoint token belongs in its URL. The ticket is bound to the browser's
+origin. One call/reservation is allowed at a time; the existing three-minute
+voice deadline and bounded audio queues still apply.
+
+The browser captures mono audio, resamples to 8 kHz and sends exact 160-byte
+G.711 mu-law frames. The server supplies the existing decoder's lookup table,
+so the browser does not need a separate codec service. Playback and microphone
+resources are stopped on hangup, disconnect or error. Use HTTPS or a loopback
+URL such as `http://127.0.0.1:4321`; ordinary HTTP on a remote VM IP is not a
+secure microphone context. Headphones help avoid acoustic feedback.
+
+The backend reuses the working voice bridge on an independent private loopback
+port and forces `allowSubmissions: false` for every demo. A second, GET-only
+Prosper transport rejects all submissions and run-management paths before any
+request can leave the process. The demo may read the real clinic catalogue and
+directory, but cannot book, cancel, move or register a patient. Do not replace
+this with a browser connection to the production `/ws` using a fabricated ID.
+
+Demo transcripts are projected and credential-redacted in memory, streamed only
+to the authenticated demo socket, and bounded to 500 entries / 256 KiB. No demo
+NDJSON/WAV is added to real call history or scoring; no extra model analyzes
+the text. Azure's resource-level usage metrics do include the actual inference.
+`clear` is opt-in on this private bridge and is sent in the same ordered stream
+as its media frames; the production Prosper transport remains unchanged.
+
+Real clinical data, explicit illustrative presentation data and the real Azure
+voice demo are separate concepts. An example chart is not measured call quality,
+a demo conversation is not a judge verdict, and no illustrative UI action
+modifies the real agent or clinic.
 
 ### Selected-call transcripts
 
@@ -612,9 +655,11 @@ are surfaced as a warning, not mistaken for corrupt data. Review such access
 locally; the writer's private `0700`/`0600` policy is unchanged.
 
 Sentiment, intent confidence, MOS, jitter, packet loss, ASR accuracy, NPS, clinical
-risk and cost remain **unavailable**, not zero. The frontend's former personality
-simulation, prompt edits, outbound calls, SMS, patient creation and playback
-controls do not gain backend implementations. Configuration is read-only.
+risk and cost remain **unmeasured**, not zero. Explicit visual examples do not
+turn them into real telemetry. Prompt edits, outbound telephone calls, SMS,
+patient creation and historical WAV playback do not gain clinic write
+implementations. Configuration remains read-only; the browser voice demo is
+the separate, opt-in feature described above.
 See [`dashboard/README.md`](dashboard/README.md) for frontend ownership.
 
 Authoritative metric and query contracts:

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { appendFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createServer as createStaticServer } from "node:http";
 import { resolve } from "node:path";
 import { test } from "node:test";
 import { chromium } from "playwright";
@@ -49,7 +51,7 @@ test("the original dashboard runs end-to-end with read-only sources, empty state
   await page.getByText("Sentimiento e intenciones: no disponibles", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Registros abiertos", exact: true }).click();
   await page.getByText("Sin registros observados con este filtro.", { exact: true }).waitFor();
-  assert.equal(await page.getByRole("region", { name: "Transcripción de la llamada" }).count(), 0);
+  assert.equal(await page.getByRole("region", { name: "Transcripción de la llamada", exact: true, includeHidden: true }).isVisible(), false);
   await page.getByRole("button", { name: "Ver mapa", exact: true }).click();
   await page.getByText("Ninguna llamada con este filtro.", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Todas", exact: true }).click();
@@ -89,6 +91,7 @@ test("source outages and zero calls render unavailable states rather than demo v
   await page.goto(`http://127.0.0.1:${port}`);
   await page.locator('input[name="dashboard-token"]').fill(settings.DASHBOARD_TOKEN);
   await page.getByRole("button", { name: "Conectar", exact: true }).click();
+  await page.locator(".source-status > summary").click();
   await page.getByRole("heading", { name: "Fuentes de datos", exact: true }).waitFor();
   assert.match(await page.locator("body").innerText(), /prosper_http_503/);
   assert.doesNotMatch(await page.locator("body").innerText(), /NaN|undefined|PRIVATE_UPSTREAM_FAILURE|342|965/);
@@ -150,9 +153,11 @@ test("selected transcripts load, render literal text and partial labels, and ref
   assert.equal(await transcript.locator("img, script").count(), 0);
   assert.equal(await page.evaluate(() => "transcriptAttack" in window), false);
   await transcript.getByRole("article", { name: "Agente · texto generado", exact: true }).waitFor();
-  await transcript.getByText("Fragmento parcial · puede estar incompleto o interrumpido", { exact: true }).waitFor();
+  await transcript.locator(".transcript-partial:not([hidden])").waitFor();
+  await transcript.getByText("Sobre este texto", { exact: true }).click();
   assert.match(await transcript.innerText(), /no tiempos acústicos exactos/);
   assert.match(await transcript.innerText(), /no demuestra lo que se oyó/);
+  await transcript.getByText("Detalle del fragmento", { exact: true }).nth(1).click();
   assert.match(await transcript.innerText(), /Intervalo del modelo: 50–150 ms/);
   assert.equal(await transcript.locator("time").first().getAttribute("datetime"),
     new Date(started.getTime() + 1000).toISOString());
@@ -304,12 +309,219 @@ test("missing text, missing records and source failures remain distinct transcri
   await transcript.getByText("Sin transcripción registrada", { exact: true }).waitFor();
   rmSync(path);
   await page.clock.fastForward(5000);
-  await transcript.getByText("Registro local no encontrado", { exact: true }).waitFor();
+  await transcript.getByText(/^Registro local no encontrado\./).waitFor();
   writeFileSync(path, "PRIVATE_BROKEN_TRANSCRIPT_SOURCE\n", { mode: 0o600 });
   await page.clock.fastForward(5000);
-  await transcript.getByText("Error al leer la transcripción", { exact: true }).waitFor();
+  await transcript.getByText(/^Error al leer la transcripción:/).waitFor();
   assert.match(await transcript.innerText(), /dashboard_invalid_record/);
   assert.doesNotMatch(await transcript.innerText(), /PRIVATE_BROKEN_TRANSCRIPT_SOURCE|Sin transcripción registrada|Registro local no encontrado/);
   assert.equal(await transcript.locator(".transcript__text").count(), 0);
   assert.deepEqual(errors, []);
+});
+
+test("transcript polling preserves its container and reading anchor, and follows only an existing bottom reader", { timeout: 45_000 }, async (t) => {
+  const directory = dashboardDirectory(t);
+  const fixture = writeDashboardRecord(directory, "dashboard-test-call", {
+    ended: false,
+    transcripts: Array.from({ length: 510 }, (_, index) => ({
+      speaker: index % 2 ? "user" : "assistant", itemId: `scroll-${index}`, partial: index === 12,
+      text: `Fragmento ${index}: texto sintético para comprobar la lectura estable.`,
+    })),
+  });
+  let content = fixture.text;
+  const settings = dashboardConfig(directory);
+  const server = createDashboardServer(settings, new DashboardService(settings, dashboardFetch().request), resolve("dashboard"));
+  const port = await server.listen();
+  t.after(() => server.close());
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1600, height: 1100 } });
+  await page.clock.install();
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(`http://127.0.0.1:${port}/#/llamadas`);
+  await page.locator('input[name="dashboard-token"]').fill(settings.DASHBOARD_TOKEN);
+  await page.getByRole("button", { name: "Conectar", exact: true }).click();
+  const region = page.getByRole("region", { name: "Transcripción de la llamada", exact: true });
+  const scroller = region.locator(".chat");
+  await region.getByText("Fragmento 509: texto sintético para comprobar la lectura estable.", { exact: true }).waitFor();
+  const handle = await scroller.elementHandle();
+  assert.ok(handle);
+  const distance = () => scroller.evaluate((node) => node.scrollHeight - node.clientHeight - node.scrollTop);
+  assert.ok(await distance() <= 2);
+  const append = (index: number) => {
+    content += `${JSON.stringify(fixture.record("transcript", {
+      speaker: "user", itemId: `scroll-${index}`, text: `Nuevo fragmento ${index}.`,
+    }, Date.now() - fixture.started.getTime() + index))}\n`;
+    writeFileSync(fixture.path, content, { mode: 0o600 });
+  };
+  append(510);
+  await page.clock.fastForward(5000);
+  await region.getByText("Nuevo fragmento 510.", { exact: true }).waitFor();
+  assert.ok(await distance() <= 2, "An existing bottom reader follows appended text");
+  assert.equal(await handle.evaluate((node) => node === document.querySelector(".calls__panel .chat")), true);
+  await scroller.evaluate((node) => { node.scrollTop = 3000; });
+  const anchor = await scroller.evaluate((node) => {
+    const top = node.getBoundingClientRect().top;
+    const row = [...node.querySelectorAll("article")].find((item) => item.getBoundingClientRect().bottom > top)!;
+    return { text: row.querySelector(".transcript__text")!.textContent!, offset: row.getBoundingClientRect().top - top };
+  });
+  const anchorOffset = () => region.locator("article").filter({ has: page.getByText(anchor.text, { exact: true }) })
+    .evaluate((row) => row.getBoundingClientRect().top - row.closest(".chat")!.getBoundingClientRect().top);
+  append(511);
+  await page.clock.fastForward(5000);
+  await region.getByText("Nuevo fragmento 511.", { exact: true }).waitFor();
+  assert.ok(Math.abs(await anchorOffset() - anchor.offset) <= 2, "Dropping old bounded entries preserves a surviving reading anchor");
+  assert.ok(await distance() > 100);
+  content = content.replace("Fragmento 12: texto sintético para comprobar la lectura estable.",
+    `Fragmento 12: ${"Ampliación parcial de ejemplo. ".repeat(45)}`);
+  writeFileSync(fixture.path, content, { mode: 0o600 });
+  await page.clock.fastForward(5000);
+  await region.getByText(/^Fragmento 12: Ampliación parcial/).waitFor();
+  assert.ok(Math.abs(await anchorOffset() - anchor.offset) <= 2, "Partial text growing above the reader does not move the reading anchor");
+  await page.getByRole("button", { name: "Ver analítica", exact: true }).click();
+  await page.getByText("G.711 mu-law · 8 kHz · mono", { exact: true }).waitFor();
+  assert.equal(await handle.evaluate((node) => node === document.querySelector(".calls__panel .chat")), true);
+  const beforeError = await scroller.evaluate((node) => node.scrollTop);
+  writeFileSync(fixture.path, "SYNTHETIC_INVALID_RECORD\n", { mode: 0o600 });
+  await page.clock.fastForward(5000);
+  await region.getByText(/^Error al leer la transcripción:/).waitFor();
+  assert.ok(Math.abs(await scroller.evaluate((node) => node.scrollTop) - beforeError) <= 2);
+  assert.match(await region.innerText(), /última lectura, sin actualizar/);
+  assert.equal(await handle.evaluate((node) => node === document.querySelector(".calls__panel .chat")), true);
+  assert.deepEqual(errors, []);
+});
+
+test("visual demo restores chart and chat hierarchy without replacing real state or calling patient/transcript APIs", { timeout: 30_000 }, async (t) => {
+  const directory = dashboardDirectory(t);
+  writeDashboardRecord(directory);
+  const settings = dashboardConfig(directory);
+  const upstream = dashboardFetch();
+  const server = createDashboardServer(settings, new DashboardService(settings, upstream.request), resolve("dashboard"));
+  const port = await server.listen();
+  t.after(() => server.close());
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1600, height: 1100 } });
+  const errors: string[] = [];
+  const requests: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("request", (request) => requests.push(request.url()));
+  const base = `http://127.0.0.1:${port}`;
+  await page.goto(base);
+  await page.locator('input[name="dashboard-token"]').fill(settings.DASHBOARD_TOKEN);
+  await page.getByRole("button", { name: "Conectar", exact: true }).click();
+  await page.getByRole("heading", { name: "Clinica Sintetica", exact: true, level: 2 }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "Llamada fake", exact: true }).isVisible(), false);
+  await page.getByRole("button", { name: "Demo visual", exact: true }).click();
+  await page.getByRole("heading", { name: "Bienvenido a maio", exact: true }).waitFor();
+  assert.match(await page.locator(".connection-banner").innerText(), /simulados/);
+  assert.match(await page.locator(".sidebar__footer").innerText(), /Clinica Sintetica|Agente real/);
+  assert.equal(await page.locator(".hero + .row + .grid--3").count(), 1, "Original hero → range → six KPI hierarchy");
+  assert.ok(await page.locator(".chart").count() >= 3);
+  assert.ok(await page.locator(".stat__spark").count() >= 4);
+  await page.getByRole("link", { name: "Llamadas", exact: true }).click();
+  await page.locator(".chat__row--agent .chat__avatar--agent").first().waitFor();
+  await page.getByRole("button", { name: "Señales", exact: true }).click();
+  await page.getByRole("heading", { name: "Estado emocional", exact: true }).waitFor();
+  assert.match(await page.locator(".signals").innerText(), /demo visual, no inferencia/);
+  await page.getByRole("button", { name: "Ver mapa", exact: true }).click();
+  await page.locator(".map__node").first().click();
+  await page.getByRole("button", { name: "Ver más en Clientes", exact: true }).click();
+  await page.getByText("Demo visual · paciente simulado", { exact: true }).waitFor();
+  assert.equal(requests.some((url) => /\/api\/dashboard\/(patients|calls)\b/.test(url)), false);
+  await page.getByRole("button", { name: "Datos reales", exact: true }).click();
+  await page.getByText("Sin paciente seleccionado", { exact: true }).waitFor();
+  assert.doesNotMatch(await page.locator("#content").innerText(), /Lucía Demo|paciente simulado|Agenda simulada/);
+  assert.ok(requests.every((url) => url.startsWith(base)));
+  assert.deepEqual(errors, []);
+});
+
+test("platform reference and product share brand, typography and primary layout geometry", { timeout: 35_000 }, async (t) => {
+  const assets = new Map<string, string>();
+  const reference = createStaticServer((request, response) => {
+    const path = new URL(request.url ?? "/", "http://reference.local").pathname;
+    const file = path === "/" ? "index.html" : path.slice(1);
+    if (request.method !== "GET" || (file !== "index.html" && !/^(src|design)\/[A-Za-z0-9_/-]+\.(js|css|svg|json)$/.test(file))) {
+      response.writeHead(404).end();
+      return;
+    }
+    let body = assets.get(file);
+    if (body === undefined) {
+      try {
+        body = execFileSync("git", ["show", `b5cdcfa:${file}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+      } catch {
+        response.writeHead(404).end();
+        return;
+      }
+      assets.set(file, body);
+    }
+    const type = file.endsWith(".js") ? "text/javascript" : file.endsWith(".css") ? "text/css" :
+      file.endsWith(".svg") ? "image/svg+xml" : file.endsWith(".json") ? "application/json" : "text/html";
+    response.writeHead(200, { "Content-Type": type, "Cache-Control": "no-store" }).end(body);
+  });
+  await new Promise<void>((done) => reference.listen(0, "127.0.0.1", done));
+  t.after(() => new Promise<void>((done, reject) => reference.close((error) => error ? reject(error) : done())));
+  const address = reference.address();
+  assert.ok(address && typeof address !== "string");
+  const referenceBase = `http://127.0.0.1:${address.port}`;
+  assert.equal((await fetch(`${referenceBase}/.env.local`)).status, 404);
+  const directory = dashboardDirectory(t);
+  const settings = dashboardConfig(directory);
+  const server = createDashboardServer(settings, new DashboardService(settings, dashboardFetch().request), resolve("dashboard"));
+  const port = await server.listen();
+  t.after(() => server.close());
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const original = await browser.newPage({ viewport: { width: 1600, height: 1100 }, reducedMotion: "reduce" });
+  await original.route("**/*", (route) => new URL(route.request().url()).origin === referenceBase ? route.continue() : route.abort());
+  await original.goto(referenceBase);
+  await original.getByRole("heading", { name: "Bienvenido a maio, Vicente", exact: true }).waitFor();
+  const current = await browser.newPage({ viewport: { width: 1600, height: 1100 }, reducedMotion: "reduce" });
+  const base = `http://127.0.0.1:${port}`;
+  const requests: string[] = [];
+  current.on("request", (request) => requests.push(request.url()));
+  await current.goto(base);
+  await current.locator('input[name="dashboard-token"]').fill(settings.DASHBOARD_TOKEN);
+  await current.getByRole("button", { name: "Conectar", exact: true }).click();
+  await current.getByRole("button", { name: "Demo visual", exact: true }).click();
+  await current.getByRole("heading", { name: "Bienvenido a maio", exact: true }).waitFor();
+  for (const selector of [".sidebar", ".brand__name", ".hero", ".hero__title", ".stat"]) {
+    const before = await original.locator(selector).first().evaluate((node) => ({
+      width: node.getBoundingClientRect().width, left: node.getBoundingClientRect().left,
+      font: getComputedStyle(node).fontFamily, weight: getComputedStyle(node).fontWeight,
+      radius: getComputedStyle(node).borderRadius,
+    }));
+    const after = await current.locator(selector).first().evaluate((node) => ({
+      width: node.getBoundingClientRect().width, left: node.getBoundingClientRect().left,
+      font: getComputedStyle(node).fontFamily, weight: getComputedStyle(node).fontWeight,
+      radius: getComputedStyle(node).borderRadius,
+    }));
+    assert.equal(after.font, before.font, `${selector}: original font stack`);
+    assert.equal(after.weight, before.weight, `${selector}: original weight`);
+    assert.equal(after.radius, before.radius, `${selector}: original corner treatment`);
+    if (selector !== ".hero__title" && selector !== ".brand__name") {
+      assert.ok(Math.abs(after.width - before.width) <= 2, `${selector}: original width`);
+      assert.ok(Math.abs(after.left - before.left) <= 2, `${selector}: original horizontal alignment`);
+    }
+  }
+  if (process.env.DASHBOARD_VISUAL_CAPTURE === "1") {
+    mkdirSync("dashboard/.local/visual-captures", { recursive: true, mode: 0o700 });
+    await original.screenshot({ path: "dashboard/.local/visual-captures/platform-home.png" });
+    await current.screenshot({ path: "dashboard/.local/visual-captures/product-home.png" });
+  }
+  await original.locator('.nav__item[href="#/llamadas"]').click();
+  await current.getByRole("link", { name: "Llamadas", exact: true }).click();
+  await original.locator(".chat-card").waitFor();
+  await current.locator(".chat-card").waitFor();
+  assert.equal(await current.locator(".chat__avatar--agent").count() > 0, true);
+  assert.equal(await current.locator(".waveform").isVisible(), true);
+  if (process.env.DASHBOARD_VISUAL_CAPTURE === "1") {
+    await original.screenshot({ path: "dashboard/.local/visual-captures/platform-calls.png" });
+    await current.screenshot({ path: "dashboard/.local/visual-captures/product-calls.png" });
+  }
+  await current.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await current.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    "Presentation controls and call layout do not overflow a narrow viewport");
+  assert.ok(requests.every((url) => url.startsWith(base)), "No external avatars, fonts or analytics");
 });

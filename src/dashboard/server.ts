@@ -6,6 +6,7 @@ import { validAuthorization } from "../server.js";
 import { log } from "../telemetry.js";
 import type { DashboardConfig } from "./config.js";
 import type { DashboardService } from "./service.js";
+import { dashboardRequestHost, dashboardRequestOrigin, demoWebSocketPath, type DashboardDemoCalls } from "./demo.js";
 
 const mime: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -16,6 +17,7 @@ const headers = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",
   "Cross-Origin-Resource-Policy": "same-origin",
+  "Permissions-Policy": "microphone=(self), camera=()",
   "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
 };
 
@@ -28,6 +30,7 @@ export function createDashboardServer(
   config: DashboardConfig,
   service: Pick<DashboardService, "snapshot" | "patients" | "appointments" | "transcript">,
   staticDirectory: string,
+  options: { demoCalls?: DashboardDemoCalls } = {},
 ) {
   const root = resolve(staticDirectory);
   const server = createServer((request, response) => {
@@ -42,13 +45,27 @@ export function createDashboardServer(
           json(response, 403, { error: "dashboard_cross_origin_denied" });
           return;
         }
+        if (request.method === "POST" && url.pathname === "/api/dashboard/demo-call" && !url.search) {
+          if (!options.demoCalls) throw new AppError("dashboard_demo_disabled");
+          if (request.headers["transfer-encoding"] || Number(request.headers["content-length"] ?? 0) !== 0) {
+            request.resume();
+            throw new AppError("dashboard_invalid_demo_request");
+          }
+          json(response, 201, await options.demoCalls.issueTicket(dashboardRequestOrigin(request)));
+          return;
+        }
         if (request.method !== "GET") {
           response.setHeader("Allow", "GET");
           json(response, 405, { error: "dashboard_read_only" });
           return;
         }
         if (url.pathname === "/api/dashboard/snapshot" && !url.search) {
-          json(response, 200, await service.snapshot());
+          json(response, 200, {
+            ...await service.snapshot(),
+            demoCall: options.demoCalls?.status() ?? {
+              enabled: false, activeCalls: 0, maxConcurrentCalls: 1, maxDurationSeconds: 180, submissionsAllowed: false,
+            },
+          });
           return;
         }
         const transcript = /^\/api\/dashboard\/calls\/([^/]*)\/transcript$/.exec(url.pathname);
@@ -91,19 +108,35 @@ export function createDashboardServer(
         return;
       }
       const body = await readFile(path);
-      response.writeHead(200, { ...headers, "Content-Type": mime[extname(path)] ?? "application/octet-stream" });
+      const host = dashboardRequestHost(request);
+      response.writeHead(200, {
+        ...headers,
+        "Content-Security-Policy": headers["Content-Security-Policy"].replace(
+          "connect-src 'self'", `connect-src 'self' ws://${host} wss://${host}`,
+        ),
+        "Content-Type": mime[extname(path)] ?? "application/octet-stream",
+      });
       response.end(request.method === "HEAD" ? undefined : body);
     })().catch((error: unknown) => {
       const code = errorCode(error);
       log("warn", "dashboard.request_failed", { code });
       if (!response.headersSent) {
         const status = code === "dashboard_transcript_not_found" ? 404 :
+          code === "dashboard_demo_origin_denied" ? 403 : code === "dashboard_demo_busy" ? 409 :
           code === "dashboard_invalid_call_id" || code === "dashboard_invalid_transcript_request" ||
-          code === "dashboard_invalid_patient_search" || code === "dashboard_invalid_patient_id" ? 400 : 503;
+          code === "dashboard_invalid_patient_search" || code === "dashboard_invalid_patient_id" ||
+          code === "dashboard_invalid_demo_request" || code === "dashboard_invalid_request_host" ? 400 : 503;
         json(response, status, { error: code });
       }
       else response.destroy();
     });
+  });
+  server.on("upgrade", (request, socket, head) => {
+    if (request.url !== demoWebSocketPath || !options.demoCalls) {
+      socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      return;
+    }
+    options.demoCalls.upgrade(request, socket, head);
   });
   server.requestTimeout = 15_000;
   server.headersTimeout = 10_000;
@@ -121,6 +154,7 @@ export function createDashboardServer(
       return address.port;
     },
     async close(): Promise<void> {
+      await options.demoCalls?.close();
       await new Promise<void>((done, reject) => server.close((error) => error ? reject(error) : done()));
     },
   };

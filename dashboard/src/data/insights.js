@@ -1,4 +1,5 @@
-import { calls, snapshot, formatDuration } from "./api.js";
+import { formatDuration } from "./api.js";
+import { getPresentation } from "./presentation.js";
 
 export const RANGES = [
   { id: "1d", label: "Hoy", days: 1, short: "hoy (Madrid)" },
@@ -8,7 +9,7 @@ export const RANGES = [
 export const DEFAULT_RANGE = "7d";
 export const rangeById = (id) => RANGES.find((range) => range.id === id) ?? RANGES[1];
 export const inRange = (call, range) => call.daysAgo >= 0 && call.daysAgo < rangeById(range).days;
-export const callsInRange = (range) => calls.filter((call) => inRange(call, range));
+export const callsInRange = (range) => getPresentation().calls.filter((call) => inRange(call, range));
 export const STATES = [
   { id: "all", label: "Todas" }, { id: "live", label: "Registros abiertos" },
   { id: "booked", label: "Con reserva" }, { id: "missed", label: "Sin acción" },
@@ -27,9 +28,13 @@ const mean = (values) => {
   const measured = values.filter(Number.isFinite);
   return measured.length ? measured.reduce((total, value) => total + value, 0) / measured.length : null;
 };
-export const availableCalls = () => snapshot?.sources.records.status === "ok" || snapshot?.sources.submissions.status === "ok";
+export const availableCalls = () => {
+  const { snapshot, simulated } = getPresentation();
+  return simulated || snapshot?.sources.records.status === "ok" || snapshot?.sources.submissions.status === "ok";
+};
 
 export function callQuality(call) {
+  if (call.simulated) return call.visualQuality;
   return {
     p50: call.technical.trace?.responseDurationP50Ms ?? null,
     p95: call.technical.trace?.responseDurationP95Ms ?? null,

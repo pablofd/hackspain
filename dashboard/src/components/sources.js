@@ -1,4 +1,4 @@
-import { el } from "../lib/dom.js";
+import { el, mount } from "../lib/dom.js";
 import { card, pill } from "./ui.js";
 import { snapshot } from "../data/api.js";
 
@@ -8,6 +8,19 @@ const names = {
   speech: "Azure Speech",
 };
 const states = { ok: "Disponible", error: "Error", not_configured: "Sin configurar", not_used: "No utilizado" };
+
+export function compactSources() {
+  const summary = el("summary", {});
+  const body = el("div", { class: "source-popover" });
+  const element = el("details", { class: "source-status" }, summary, body);
+  function update() {
+    const errors = Object.values(snapshot.sources).filter((source) => source.status === "error").length;
+    summary.textContent = `Fuentes de datos${errors ? ` · ${errors} con error` : " · estado real"}`;
+    summary.classList.toggle("text-alert", errors > 0);
+    mount(body, sourcesCard());
+  }
+  return { element, update, close() { element.open = false; } };
+}
 
 export function sourcesCard() {
   return card({ title: "Fuentes de datos", sub: "Sin datos simulados ni sustituciones automáticas" },
