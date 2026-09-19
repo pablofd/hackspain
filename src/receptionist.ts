@@ -79,8 +79,8 @@ const toolSchemas = {
     })).max(12).optional().describe("Only symptom facts the caller actually stated. Never mark a suspected, hypothetical or negated symptom as present."),
   }),
   locate_origin: z.strictObject({
-    address: z.string().min(3).max(200).describe("Only the public street/place and town stated for finding the nearest clinic, without patient identity."),
-    candidate_id: idSchema.optional().describe("If several addresses were returned, the candidate explicitly selected by the caller."),
+    address: z.string().min(3).max(200).describe("Only the public street/place and town stated for finding the nearest clinic, without patient identity. When selecting a returned candidate, use its selection_arguments unchanged, not its display label."),
+    candidate_id: idSchema.optional().describe("Only the returned candidate explicitly selected by the caller. Copy its selection_arguments, including the original address; never invent or reuse an expired ID."),
   }),
   search_availability: availabilityInput,
   list_appointments: z.strictObject({
@@ -102,7 +102,7 @@ const descriptions: Record<keyof typeof toolSchemas, string> = {
   find_patient: "For an existing-patient request, ask one short question for the PATIENT's full name plus ONE identifier, normally DNI/NIE. Use an already volunteered phone or birth date instead; do not recite an identifier menu or ask for a third field. Look up as soon as two matching fields are available. Not a registration prerequisite: use collect_registration instead. Returns no stored DNI or phone.",
   collect_registration: "Start an explicitly requested new-patient registration immediately, even before collecting details. Save caller-provided demographics incrementally; returns only missing/invalid fields and the next short question group. No existing-patient verification is required. Corrections invalidate this registration's unsubmitted proposal. When ready, call prepare_action with registration_id BEFORE the final readback; a later explicit confirmation is still required.",
   resolve_request: "Resolve the caller's explicitly chosen provider/specialty; use routine symptom routing only when no specialty/provider was requested. Ask about ambiguous doctors; do not guess. Emergency red flags still override scheduling: a medical_emergency result requires immediate report_outcome ESCALATE, no booking. Patient age is calculated from their verified chart.",
-  locate_origin: "Resolve only the caller's public street/place and town for nearest-site scheduling. If several candidates remain, ask the caller to select one, then repeat with candidate_id. Returns an origin_id for search_availability.",
+  locate_origin: "Resolve only the caller's current public street/place and town for nearest-site scheduling, not directions to a clinic or its entrance/floor. If candidates need clarification, ask the caller to select one, then repeat its selection_arguments unchanged. A corrected address requires a fresh lookup without candidate_id. Returns an origin_id for search_availability.",
   search_availability: "Find real slots for a verified patient. For BOOK set prepare_booking:true to prepare the first eligible option when its held policy is unambiguous; booking_proposal is NOT submitted. Omit the flag for rescheduling or read-only searches. Omit dates for earliest from tomorrow; use date_phrase for spoken relative dates. Specify only caller constraints and keep request_id for corrections. nearest_origin_id selects the closest eligible site. For a later RESCHEDULE use the selected appointment's later_search from list_appointments; after_appointment_id anchors the date, doctor and site to verified data. On the first search omit request_id; reuse the returned ID for corrections.",
   list_appointments: "Read a verified patient's appointments before cancelling or moving one. Only upcoming appointments can be changed. Select the caller's intended appointment; its later_search supplies the exact patient/appointment IDs for a later RESCHEDULE, preserving the original doctor/site without asking again. Clarify only when the intended appointment or a requested change is ambiguous.",
   prepare_action: "Prepare (but DO NOT SEND) an action. request.action is BOOK, CANCEL, RESCHEDULE or REGISTER. Use returned slot_id for booking/moving. For REGISTER prefer the ready registration_id from collect_registration and follow readback_guidance; complete new_patient remains supported. Read the returned details and obtain explicit confirmation. An identical unconfirmed proposal in the same intent is reused; changed details require a new proposal and consent.",
@@ -399,6 +399,7 @@ export class Receptionist {
         const details = {
           ...(failure instanceof InputValidationError ? { validation_issues: failure.issues } : {}),
           ...(name === "search_availability" ? this.searchDiagnostics(args) : {}),
+          ...(name === "locate_origin" ? this.originDiagnostics(args) : {}),
         };
         this.call.record({
           type: "tool", name, status: "error", code: failure instanceof AppError ? failure.code : "internal_error",
@@ -448,6 +449,20 @@ export class Receptionist {
     return Object.keys(fields).length
       ? { search: fields, ...(truncated.length ? { truncated_fields: truncated } : {}) }
       : {};
+  }
+
+  private originDiagnostics(input: unknown) {
+    const args = input && typeof input === "object" && !Array.isArray(input)
+      ? input as Record<string, unknown> : {};
+    const candidateId = typeof args.candidate_id === "string" ? args.candidate_id : undefined;
+    const candidate = candidateId === undefined ? undefined : this.originCandidates.get(candidateId);
+    return {
+      candidate_supplied: candidateId !== undefined,
+      candidate_available: Boolean(candidate),
+      address_matches_candidate: Boolean(candidate && typeof args.address === "string" &&
+        args.address.length <= 200 && candidate.address === normalizeHumanText(args.address)),
+      candidate_count: this.originCandidates.size,
+    };
   }
 
   private outcomeState(input: z.infer<typeof toolSchemas.report_outcome>) {
@@ -594,6 +609,14 @@ export class Receptionist {
 
   private toolDecision(name: string, result: unknown): { details?: unknown } {
     if (!result || typeof result !== "object") return {};
+    if (name === "locate_origin") {
+      const resolved = "origin_id" in result && typeof result.origin_id === "string";
+      return { details: {
+        origin_resolved: resolved,
+        candidate_count: resolved ? 1 : "candidates" in result && Array.isArray(result.candidates) ? result.candidates.length : 0,
+        candidates_truncated: "truncated" in result && result.truncated === true,
+      } };
+    }
     if (name === "collect_registration" && "registration_id" in result) {
       const state = result as ReturnType<typeof registrationGuidance>;
       return { details: {
@@ -909,6 +932,8 @@ export class Receptionist {
     if (advanceDay && previousSearch && previousSearch.dateTo >= clinic.calendar.ends) {
       throw new AppError("calendar_exhausted", "There is no later bookable day in the clinic calendar. Do not claim to have searched beyond it; use the prior request's evidence if the caller declines other alternatives.");
     }
+    const invalidatedBookingOffer = Boolean(previous && [...this.proposals.values()].some((proposal) =>
+      proposal.requestId === previous.id && proposal.action.action === "BOOK" && proposal.status === "proposed"));
     if (previous) this.invalidateRequest(previous);
     const merged = previous ? { ...previous.input, ...input } : {
       ...(original ? {
@@ -1076,12 +1101,17 @@ export class Receptionist {
     const firstSlot = slots[0];
     const payablePlans = [...new Set(firstSlot?.payable_with.filter((plan) => plans.has(plan)) ?? [])];
     const policy = payablePlans.length === 1 ? payablePlans[0] : undefined;
-    const bookingProposal = prepareBooking && firstSlot && policy ? {
-      ...await this.prepare({
-        action: "BOOK", patient_id: patient.patient_id, slot_id: firstSlot.slot_id, policy_id: policy,
-      }, turn),
-      slot_id: firstSlot.slot_id, submitted: false,
+    const bookingPreparation = !original && firstSlot && policy ? { request: {
+      action: "BOOK" as const, patient_id: patient.patient_id, slot_id: firstSlot.slot_id, policy_id: policy,
+    } } : null;
+    const bookingProposal = prepareBooking && bookingPreparation ? {
+      ...await this.prepare(bookingPreparation.request, turn),
+      slot_id: bookingPreparation.request.slot_id, submitted: false,
     } : null;
+    const nearestBookingContinuation = Boolean(!original && merged.nearest_origin_id && firstSlot && invalidatedBookingOffer);
+    const continuationInstruction = nearestBookingContinuation
+      ? "The earlier BOOK offer is invalid after this nearest-site re-search. Answer location/direction questions briefly using available clinic facts; do not invent routes. If the caller still wants this booking, return directly to one matching offer rather than repeatedly asking permission to offer it. Use the new booking_proposal if present; otherwise use booking_continuation.prepare_action when present, or prepare the caller's chosen slot/eligible held policy. Old consent and agreement about a location are not booking confirmation. "
+      : "";
     const emptyCalendarWindow = !original && !slots.length && !scan.blocked.length && !dates.closed &&
       scan.endSearched === dates.dateTo && request.reasons.size === 1 && request.reasons.has("no_availability");
     return {
@@ -1089,6 +1119,10 @@ export class Receptionist {
       slots, recommended_slot_id: firstSlot?.slot_id ?? null,
       blocked: scan.blocked, searched_from: dates.dateFrom, searched_to: scan.endSearched,
       booking_proposal: bookingProposal, submitted: false, pricing_status: "not_supplied",
+      ...(nearestBookingContinuation ? { booking_continuation: {
+        previous_offer_invalidated: true,
+        prepare_action: bookingProposal ? null : bookingPreparation,
+      } } : {}),
       ...(original && originalProvider && originalLocation ? { reschedule: {
         original_appointment: original,
         original_provider_name: originalProvider.name, original_location_name: originalLocation.name,
@@ -1124,7 +1158,7 @@ export class Receptionist {
           },
         } : {}),
       },
-      instruction: slots.length
+      instruction: continuationInstruction + (slots.length
         ? original
           ? "These are later RESCHEDULE options for reschedule.original_appointment, never BOOK. Use reschedule.prepare_action when present and matching the final request; otherwise select the caller's slot/eligible held policy and prepare RESCHEDULE with this exact appointment_id. Prepare before one concise readback, then wait for a NEW confirming caller turn. Keep the known doctor/site unless the caller changes them; do not ask for them again. After a correction use this request_id, search again and prepare the new offer before its readback."
           : bookingProposal
@@ -1147,7 +1181,7 @@ export class Receptionist {
             : "The held policy question is already resolved; do not ask it again.",
           "When no acceptable alternative remains, use report_outcome BEFORE your final refusal or goodbye.",
           "Never invent self-pay or insurer authorization. The return value is guidance, not an accepted record.",
-        ].join(" "),
+        ].join(" ")),
     };
   }
 
@@ -1167,8 +1201,13 @@ export class Receptionist {
     const addressKey = normalizeHumanText(input.address);
     if (input.candidate_id) {
       const selected = this.originCandidates.get(input.candidate_id);
-      if (!selected || selected.address !== addressKey) {
-        throw new AppError("address_candidate_not_found", "Resolve the caller's street and town again; do not reuse a candidate from another location.");
+      if (!selected) {
+        throw new AppError("address_candidate_not_found",
+          "This candidate is missing or no longer available. Use the caller's current public address and omit candidate_id to obtain fresh candidates. Never invent an ID or reuse an earlier shortlist.");
+      }
+      if (selected.address !== addressKey) {
+        throw new AppError("address_candidate_address_mismatch",
+          "This candidate belongs to a different address query. If the caller selected it without changing location, copy its returned selection_arguments unchanged, not its display label. If the caller corrected the address, omit candidate_id and resolve the corrected public address first.");
       }
       const id = `origin-${++this.sequence}`;
       this.origins.set(id, selected.point);
@@ -1198,16 +1237,20 @@ export class Receptionist {
       const id = `address-${++this.sequence}`;
       const point = { latitude: candidate.latitude, longitude: candidate.longitude };
       this.originCandidates.set(id, { address: addressKey, label: candidate.label, point });
-      return { candidate_id: id, label: candidate.label };
+      return {
+        candidate_id: id, label: candidate.label,
+        selection_arguments: { address: input.address, candidate_id: id },
+      };
     });
     if (resolution.status === "resolved" && candidates.length === 1) {
       const candidate = candidates[0];
       if (!candidate) throw new AppError("address_candidate_not_found");
-      return this.locateOrigin({ ...input, candidate_id: candidate.candidate_id }, turn);
+      return this.locateOrigin(candidate.selection_arguments, turn);
     }
     return {
-      status: "needs_clarification", candidates,
-      instruction: "Ask for the street number and municipality, or which candidate matches. Do not guess coordinates or a site. Only repeat with a candidate_id the caller selected.",
+      status: "needs_clarification", candidates, truncated: resolution.truncated,
+      ...(resolution.status === "needs_clarification" ? { reason: resolution.reason } : {}),
+      instruction: "Clarify only the missing or ambiguous public location detail. When the caller selects a candidate, repeat its selection_arguments unchanged; do not substitute the display label or invent an ID. If the caller corrects the address instead, resolve it without candidate_id. Do not guess coordinates or a site.",
     };
   }
 
@@ -1547,6 +1590,7 @@ export function receptionistInstructions(startedAt: Date, allowSubmissions: bool
     "Pass a colloquial date exactly in date_phrase so code resolves it from the call date in Madrid. When the requested day/site is closed, offer the returned nextOpenDate and only set allow_next_open_day after the caller agrees; preserve site and morning/afternoon.",
     "When an OPEN day has no eligible slots and the caller agrees to the following day, use the returned next_day_search/advance_day with the same request_id. Dates like tomorrow always refer to call start, not the last searched date. Read searched_from/searched_to before claiming you checked another day.",
     "For the nearest site, ask the public street number and municipality, use locate_origin, clarify any ambiguous match, then search with nearest_origin_id. The closest site must also serve the specialty, insurance and date request; never guess a site from its name.",
+    "A question about getting to an offered clinic does not change the caller's origin or cancel their booking request. Use the returned clinic street address; the current catalogue does not publish entrances, floors or turn-by-turn directions. State that limitation briefly instead of inventing access details or geocoding the clinic again. If the caller still wants the appointment, return to the current fresh offer and ask for explicit confirmation; agreement about a location is not booking consent. If an unknown access detail is essential to their decision, do not assume they agree to proceed.",
     "If a requested doctor cannot attend, preserve specialty AND site for alternatives. Offer the returned compatible provider options, and search the same request_id with relax_constraints:['provider'] only after the caller accepts changing doctor. Do not silently switch site.",
     "search_availability returns a request_id per patient/intent. Reuse it for corrections or another insurance plan. Preserve all existing constraints unless the caller agrees to relax them, then list those in relax_constraints. Use new_request:true ONLY for a distinct additional appointment, never to work around a submitted action.",
     "Use exact returned slot_id and payable_with. Appointment type is chosen by the API from history/specialty, not by you. Use the plan on file unless the caller explicitly states a second plan.",

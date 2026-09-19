@@ -267,11 +267,28 @@ It currently resolves Madrid-province locations; unknown/ambiguous addresses
 require clarification. Candidate coordinates must come from validated geocoder
 responses, never model inference or a city-centre approximation.
 
+Each ambiguous candidate carries `selection_arguments` with the exact original
+public address and its call-local ID. Use that pair only after the caller selects
+the candidate; a corrected address starts a fresh lookup without `candidate_id`.
+Missing/stale candidates and edited address queries have distinct recovery
+guidance. Origin diagnostics contain only booleans/counts, never raw addresses.
+
 Public geography is cached and external requests are rate-limited. Timeouts,
 malformed data and service limits are explicit errors; a geocoding outage is
 not `no_availability`. The returned `origin_id` is local to the call and can be
 used as `nearest_origin_id` in availability. A closer site without eligible
 appointments is skipped; patient/provider/site/time/plan constraints still apply.
+If a nearest-site re-search invalidates a proposed BOOK, `booking_continuation`
+guides preparation of a fresh matching offer (with arguments only when the held
+policy is unambiguous). Answer location questions briefly and return to the
+current booking request. Automatic preparation remains opt-in; old proposal IDs
+and old consent cannot be reused, and reschedules/read-only searches do not
+become automatic bookings.
+Entrance, floor and turn-by-turn route details are not supplied by the current
+catalogue. Do not invent them or treat an access question as a new caller
+origin. Use the known street address, acknowledge missing details and return
+to the fresh offer without skipping consent. A necessary unresolved access
+condition must not be treated as agreement to book.
 
 Natural-language interpretation, noisy speech recognition and explicit consent
 remain model-dependent. Unsupported date or symptom wording must be clarified;
