@@ -1,5 +1,5 @@
 import { readFile, realpath } from "node:fs/promises";
-import { createServer, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { AppError, errorCode } from "../errors.js";
 import { validAuthorization } from "../server.js";
@@ -26,6 +26,30 @@ function json(response: ServerResponse, status: number, data: unknown): void {
   response.end(JSON.stringify(data));
 }
 
+async function requireEmptyBody(request: IncomingMessage): Promise<void> {
+  if (Number(request.headers["content-length"] ?? 0) !== 0) {
+    request.resume();
+    throw new AppError("dashboard_invalid_demo_request");
+  }
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      request.removeListener("data", data);
+      request.removeListener("end", end);
+      request.removeListener("error", failed);
+      request.removeListener("aborted", failed);
+    };
+    const failed = () => { cleanup(); reject(new AppError("dashboard_invalid_demo_request")); };
+    const data = (chunk: Buffer) => {
+      if (chunk.length) { failed(); request.resume(); }
+    };
+    const end = () => { cleanup(); resolve(); };
+    request.on("data", data);
+    request.once("end", end);
+    request.once("error", failed);
+    request.once("aborted", failed);
+  });
+}
+
 export function createDashboardServer(
   config: DashboardConfig,
   service: Pick<DashboardService, "snapshot" | "patients" | "appointments" | "transcript">,
@@ -47,10 +71,7 @@ export function createDashboardServer(
         }
         if (request.method === "POST" && url.pathname === "/api/dashboard/demo-call" && !url.search) {
           if (!options.demoCalls) throw new AppError("dashboard_demo_disabled");
-          if (request.headers["transfer-encoding"] || Number(request.headers["content-length"] ?? 0) !== 0) {
-            request.resume();
-            throw new AppError("dashboard_invalid_demo_request");
-          }
+          await requireEmptyBody(request);
           json(response, 201, await options.demoCalls.issueTicket(dashboardRequestOrigin(request)));
           return;
         }

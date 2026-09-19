@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { readdirSync } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
@@ -136,6 +137,24 @@ test("concurrent ticket requests cannot create multiple reserved calls", async (
   for (const response of responses) await response.arrayBuffer();
   assert.equal(calls, 0);
   assert.equal(h.demo.status().activeCalls, 1);
+});
+
+test("an empty chunked proxy request is accepted but a real chunked body is rejected", async (t) => {
+  let calls = 0;
+  const h = await setup(t, async () => { calls += 1; throw new Error("No model expected"); });
+  const post = (body: string) => new Promise<number>((resolve, reject) => {
+    const request = httpRequest(`${h.base}/api/dashboard/demo-call`, {
+      method: "POST", headers: { ...h.headers, "Transfer-Encoding": "chunked" },
+    }, (response) => {
+      response.resume();
+      response.once("end", () => resolve(response.statusCode!));
+    });
+    request.once("error", reject);
+    request.end(body);
+  });
+  assert.equal(await post("{}"), 400);
+  assert.equal(await post(""), 201);
+  assert.equal(calls, 0);
 });
 
 test("browser audio reuses exact frames, ordered clear and protected transcript projection without disk recordings", async (t) => {

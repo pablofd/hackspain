@@ -575,6 +575,7 @@ click are required; opening the page, looking at example data or issuing an
 unused connection ticket does not start inference.
 
 The authenticated, same-origin `POST /api/dashboard/demo-call` accepts no body.
+An empty chunked request from a reverse proxy is valid; an actual body is rejected.
 It returns a server-owned `demo-...` call ID, a one-use 30-second ticket, codec
 metadata and `/api/dashboard/demo-call/ws`. The WebSocket uses the
 `maio-demo` subprotocol plus that ticket; neither the dashboard token nor the
