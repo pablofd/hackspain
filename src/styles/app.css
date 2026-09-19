@@ -1427,6 +1427,184 @@ table.data .cell-sub {
   font-family: var(--font-ui);
 }
 
+/* --- Estado del agente: telaraña de rasgos ---------------- */
+.config-board {
+  display: grid;
+  gap: var(--sp-4);
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+.config-board.is-status {
+  grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr);
+}
+
+/* Con el estado abierto, las rejillas internas se agrupan en una columna */
+.config-board.is-status .grid--main,
+.config-board.is-status .grid--2 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.status-host {
+  position: sticky;
+  top: 0;
+}
+
+.status {
+  border: 1px solid var(--stroke-soft);
+  background: var(--white);
+  animation: signals-in var(--dur) var(--ease-out) both;
+}
+
+.status__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.status__head > * {
+  position: relative;
+  z-index: 1;
+}
+
+.status__logo {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  color: var(--white);
+}
+
+.status__name {
+  font-family: var(--font-brand);
+  font-size: 19px;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.status__tagline {
+  font-size: 11.5px;
+  color: rgba(var(--white-rgb), 0.78);
+  margin-top: 3px;
+}
+
+.status__body {
+  padding: var(--sp-4) var(--sp-4) var(--sp-2);
+}
+
+.status__radar {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.status__axis {
+  font-size: 9.5px;
+  fill: var(--text-muted);
+  font-family: var(--font-ui);
+}
+
+.status__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: var(--sp-3);
+  background: var(--hairline);
+  border: 1px solid var(--hairline);
+}
+
+.status__cell {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: 7px 10px;
+  background: var(--white);
+}
+
+.status__cell-label {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.status__cell-value {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.status__notes {
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+  border-top: 1px solid var(--hairline);
+}
+
+.status__note {
+  display: flex;
+  gap: 9px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin-bottom: 9px;
+}
+
+.status__note:last-child {
+  margin-bottom: 0;
+}
+
+.status__bullet {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  margin-top: 7px;
+  background: var(--dusty-denim);
+}
+
+/* --- Deslizador ------------------------------------------- */
+.range {
+  width: 100%;
+  height: 22px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.range::-webkit-slider-runnable-track {
+  height: 2px;
+  background: rgba(var(--ink-rgb), 0.18);
+}
+
+.range::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -5.5px;
+  background: var(--pitch-black);
+  border: 0;
+}
+
+.range::-moz-range-track {
+  height: 2px;
+  background: rgba(var(--ink-rgb), 0.18);
+}
+
+.range::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border: 0;
+  border-radius: 0;
+  background: var(--pitch-black);
+}
+
+.segmented--wrap {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1200px) {
+  .config-board.is-status { grid-template-columns: minmax(0, 1fr); }
+  .status-host { position: static; }
+}
+
 /* --- Mapa de relaciones ----------------------------------- */
 .map-full {
   position: relative;

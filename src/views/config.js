@@ -1,6 +1,8 @@
 import { el, mount } from "../lib/dom.js";
+import { icon } from "../lib/icons.js";
 import { card, pill, toggle, bar } from "../components/ui.js";
-import { agentProfile } from "../data/mock.js";
+import { statusCard } from "../components/status.js";
+import { agentProfile, behaviourDefaults, TRAITS, POLICIES } from "../data/mock.js";
 
 export const meta = {
   title: "Configuración",
@@ -16,8 +18,19 @@ const TABS = [
 
 export function render() {
   let tab = "agente";
+  let statusOpen = false;
+  const state = {
+    traits: { ...behaviourDefaults.traits },
+    policies: { ...behaviourDefaults.policies },
+  };
 
   const panel = el("div", { class: "stack stack--lg" });
+  const statusHost = el("aside", { class: "status-host", hidden: true });
+  const board = el("div", { class: "config-board" }, panel, statusHost);
+
+  function paintStatus() {
+    if (statusOpen) mount(statusHost, statusCard(state));
+  }
 
   const tabsBar = el(
     "div",
@@ -37,11 +50,29 @@ export function render() {
     ),
   );
 
+  const statusBtn = el(
+    "button",
+    {
+      class: "btn",
+      onclick: () => {
+        statusOpen = !statusOpen;
+        statusBtn.classList.toggle("btn--primary", statusOpen);
+        statusBtn.lastChild.textContent = statusOpen ? "Ocultar estado" : "Estado";
+        board.classList.toggle("is-status", statusOpen);
+        statusHost.hidden = !statusOpen;
+        paintStatus();
+      },
+    },
+    icon("relations", "nav__icon"),
+    el("span", {}, "Estado"),
+  );
+
   function paint() {
     tabsBar.querySelectorAll("button").forEach((b, i) => {
       b.classList.toggle("is-active", TABS[i].id === tab);
     });
-    mount(panel, ...tabContent(tab));
+    mount(panel, ...tabContent(tab, state, paintStatus));
+    paintStatus();
   }
 
   paint();
@@ -49,13 +80,13 @@ export function render() {
   return el(
     "div",
     { class: "view" },
-    el("div", { class: "row row--wrap" }, tabsBar),
-    panel,
+    el("div", { class: "row row--wrap" }, tabsBar, el("div", { class: "ml-auto" }, statusBtn)),
+    board,
   );
 }
 
-function tabContent(tab) {
-  if (tab === "instrucciones") return instructionsTab();
+function tabContent(tab, state, onChange) {
+  if (tab === "instrucciones") return instructionsTab(state, onChange);
   if (tab === "acciones") return actionsTab();
   if (tab === "cumplimiento") return complianceTab();
   return agentTab();
@@ -113,7 +144,7 @@ function agentTab() {
   ];
 }
 
-function instructionsTab() {
+function instructionsTab(state, onChange) {
   const editor = el(
     "textarea",
     { class: "textarea", style: { minHeight: "300px" } },
@@ -164,8 +195,53 @@ function instructionsTab() {
         ),
       ),
     ),
+
+    el(
+      "div",
+      { class: "grid grid--main" },
+      card(
+        { title: "Carácter", sub: "Mueve los rasgos y observa el estado del agente" },
+        ...TRAITS.map(([key, label, desc]) => slider(label, desc, state.traits[key], (v) => {
+          state.traits[key] = v;
+          onChange();
+        })),
+      ),
+      card(
+        { title: "Reacciones", sub: "Qué hace maio en cada situación" },
+        ...POLICIES.map((p) =>
+          choice(p.label, p.options, state.policies[p.id], (i) => {
+            state.policies[p.id] = i;
+            onChange();
+          }),
+        ),
+      ),
+    ),
     saveBar(),
   ];
+}
+
+/* Deslizador 0-100 que refleja el valor en vivo */
+function slider(label, desc, value, onInput) {
+  const out = el("span", { class: "meter__val" }, String(value));
+  const input = el("input", {
+    class: "range",
+    type: "range",
+    min: "0",
+    max: "100",
+    step: "2",
+    value: String(value),
+    oninput: (e) => {
+      out.textContent = e.target.value;
+      onInput(Number(e.target.value));
+    },
+  });
+  return el(
+    "div",
+    { class: "field" },
+    el("div", { class: "meter__top" }, el("label", {}, label), out),
+    input,
+    desc && el("span", { class: "hint" }, desc),
+  );
 }
 
 function actionsTab() {
@@ -274,10 +350,10 @@ function toggleRow(name, desc, on) {
 }
 
 /* Selector en línea con una sola opción activa */
-function choice(label, options, activeIndex) {
+function choice(label, options, activeIndex, onPick) {
   const group = el(
     "div",
-    { class: "segmented" },
+    { class: "segmented segmented--wrap" },
     ...options.map((o, i) =>
       el(
         "button",
@@ -286,6 +362,7 @@ function choice(label, options, activeIndex) {
           onclick: (e) => {
             group.querySelectorAll("button").forEach((b) => b.classList.remove("is-active"));
             e.currentTarget.classList.add("is-active");
+            onPick?.(i);
           },
         },
         o,

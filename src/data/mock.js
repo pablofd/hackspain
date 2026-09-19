@@ -58,6 +58,74 @@ CUANDO NO SEPAS ALGO
   ],
 };
 
+/* Rasgos 0-100 y políticas de reacción; alimentan la telaraña de estado */
+export const behaviourDefaults = {
+  traits: {
+    asertividad: 58,
+    empatia: 82,
+    iniciativa: 64,
+    rigor: 90,
+    brevedad: 72,
+    paciencia: 76,
+  },
+  policies: {
+    insultos: 1,
+    dudas: 0,
+    urgencia: 1,
+    interrupciones: 0,
+    silencio: 1,
+    insistencia: 0,
+    desconocido: 0,
+  },
+};
+
+export const TRAITS = [
+  ["asertividad", "Asertividad", "Cuánto dirige la conversación"],
+  ["empatia", "Empatía", "Cuánto acompaña emocionalmente"],
+  ["iniciativa", "Iniciativa", "Cuánto propone sin que se lo pidan"],
+  ["rigor", "Rigor clínico", "Cuánto se ciñe al protocolo"],
+  ["brevedad", "Brevedad", "Respuestas cortas frente a explicativas"],
+  ["paciencia", "Paciencia", "Cuánto espera y repite sin frustrarse"],
+];
+
+export const POLICIES = [
+  {
+    id: "insultos",
+    label: "Ante insultos o agresividad",
+    options: ["Mantener la calma", "Advertir una vez", "Cerrar la llamada"],
+  },
+  {
+    id: "dudas",
+    label: "Ante dudas o ambigüedad",
+    options: ["Preguntar de nuevo", "Asumir lo más probable", "Derivar a humano"],
+  },
+  {
+    id: "urgencia",
+    label: "Ante síntomas de alarma",
+    options: ["Escalar de inmediato", "Confirmar y escalar", "Cita urgente"],
+  },
+  {
+    id: "interrupciones",
+    label: "Si el paciente le interrumpe",
+    options: ["Cede la palabra", "Termina la frase"],
+  },
+  {
+    id: "silencio",
+    label: "Silencio del paciente",
+    options: ["Espera 3 s", "Espera 6 s", "Espera 10 s"],
+  },
+  {
+    id: "insistencia",
+    label: "Si rechaza el hueco ofrecido",
+    options: ["Ofrece una alternativa", "Insiste hasta dos veces", "No insiste"],
+  },
+  {
+    id: "desconocido",
+    label: "Si no sabe la respuesta",
+    options: ["Promete devolución con plazo", "Deriva a recepción", "Ofrece el email"],
+  },
+];
+
 export const calls = [
   {
     id: "CL-40923",
