@@ -1,0 +1,35 @@
+{
+  "name": "maio",
+  "tagline": "Recepción agéntica para clínicas",
+  "wordmark": {
+    "text": "maio",
+    "case": "minúsculas",
+    "font": "Space Grotesk Medium (500)",
+    "tracking": "-0.02em",
+    "file": "design/brand/maio-logo.svg"
+  },
+  "symbol": {
+    "description": "Burbuja de conversación trazada a mano con onda de voz en su interior, inscrita en un squircle",
+    "usos": ["app", "favicon", "avatar del agente", "burbuja de voz"],
+    "file": "design/brand/maio-icon.svg",
+    "variantes": [
+      { "id": "tinta-negra", "fondo": "#12100E", "simbolo": "#F6F0ED" },
+      { "id": "fondo-claro", "fondo": "#F6F0ED", "simbolo": "#12100E" },
+      { "id": "contorno", "fondo": "transparente", "simbolo": "#12100E" }
+    ],
+    "areaDeRespeto": "Igual a la altura de la onda interior por cada lado"
+  },
+  "colores": {
+    "tinta": "#12100E",
+    "papel": "#F6F0ED",
+    "denim": "#748CAB",
+    "pizarra": "#646E78",
+    "rojo": "#EC0B43",
+    "blanco": "#FFFFFF"
+  },
+  "tipografia": {
+    "marca": "Space Grotesk Medium",
+    "interfaz": "SF Pro Regular (400)",
+    "titularesGrandes": "SF Pro Light (300)"
+  }
+}

@@ -1,0 +1,69 @@
+import { el, mount } from "../lib/dom.js";
+import { card, pill, emptyState } from "../components/ui.js";
+import { sourcesCard } from "../components/sources.js";
+import { snapshot } from "../data/api.js";
+
+export const meta = { title: "Configuración", sub: "Estado observado del backend · sin cambios desde el dashboard" };
+const tabs = [
+  { id: "agente", label: "Agente" }, { id: "instrucciones", label: "Instrucciones" },
+  { id: "acciones", label: "Acciones" }, { id: "cumplimiento", label: "Cumplimiento" },
+];
+const capabilities = {
+  voice: "Voz entrante", clinic: "Consultas a Prosper", book: "Comunicar reserva",
+  reschedule: "Comunicar cambio", cancel: "Comunicar cancelación", register: "Comunicar alta",
+  outcomes: "Comunicar NO_ACTION / ESCALATE",
+};
+
+export function render() {
+  let tab = "agente";
+  const panel = el("div", { class: "stack stack--lg" });
+  function paint() {
+    const health = snapshot.health;
+    if (tab === "agente") mount(panel,
+      el("div", { class: "grid grid--main" },
+        card({ title: "Perfil en ejecución", sub: "Respuesta de /healthz; no prueba una invocación exitosa a Azure" },
+          el("dl", { class: "kv" }, ...[
+            ["Clínica", snapshot.clinic?.name],
+            ["Estado", health?.status],
+            ["Conector", health?.voiceConnector],
+            ["Deployment de voz", health?.voiceDeployment],
+            ["Backend Live", health?.voiceConnector === "live" ? health.voiceBackendDeployment : "No utilizado"],
+            ["Ganancia de salida", health ? `${health.voiceOutputGainDb} dB` : null],
+            ["Llamadas activas", health?.activeCalls],
+            ["Exportación de trazas", health?.telemetry === "azure" ? "Application Insights" : health ? "Consola local" : null],
+          ].flatMap(([label, value]) => [el("dt", {}, label), el("dd", {}, value ?? "No disponible")]))),
+        sourcesCard()),
+      card({ title: "Canales" }, pill("Prosper / WebSocket entrante"),
+        el("p", { class: "card__sub" }, "No hay WhatsApp, SMS, llamadas salientes ni un servicio Speech separado en el runtime.")));
+    else if (tab === "instrucciones") mount(panel,
+      card({ title: "Instrucciones del agente" }, emptyState("Gestionadas en el backend",
+        "El prompt y sus salvaguardas permanecen en src/receptionist.ts. No se cambian desde esta integración.")),
+      card({ title: "Carácter, reacciones y simulación" }, emptyState("No implementados",
+        "No hay valores reales de personalidad ni previsiones de satisfacción que mostrar. Los ajustes de demostración no se aplican al agente.")));
+    else if (tab === "acciones") mount(panel,
+      card({ title: "Capacidades publicadas por el agente", sub: "Solo lectura. Una acción clínica exige los controles de identidad y confirmación del backend." },
+        health ? el("div", { class: "list" }, ...health.capabilities.map((capability) =>
+          el("div", { class: "list__item" }, el("div", { class: "list__body" }, capabilities[capability] ?? capability), pill("Habilitada"))))
+          : emptyState("No disponible", "No se ha podido consultar /healthz.")),
+      sourcesCard());
+    else mount(panel,
+      card({ title: "Grabación local" },
+        el("dl", { class: "kv" },
+          el("dt", {}, "Registros privados"), el("dd", {}, health ? (health.localRecording ? "Activados" : "Desactivados") : "No disponible"),
+          el("dt", {}, "Audio local"), el("dd", {}, health ? (health.localAudioRecording ? "Activado" : "Desactivado") : "No disponible"),
+          el("dt", {}, "Contenido servido"), el("dd", {}, "Solo metadatos permitidos; no NDJSON, transcripciones ni WAV"))),
+      card({ title: "Cumplimiento" }, emptyState("Sin puntuación automática",
+        "La presencia de guardas o recibos no demuestra consentimiento correcto, exactitud clínica ni cumplimiento normativo. No se inventan porcentajes.")));
+  }
+  const bar = el("div", { class: "segmented" }, ...tabs.map((item) =>
+    el("button", { class: tab === item.id ? "is-active" : "", onclick: (event) => {
+      tab = item.id;
+      bar.querySelectorAll("button").forEach((button) => button.classList.remove("is-active"));
+      event.currentTarget.classList.add("is-active");
+      paint();
+    } }, item.label)));
+  const root = el("div", { class: "view" }, bar, panel);
+  root.update = paint;
+  paint();
+  return root;
+}

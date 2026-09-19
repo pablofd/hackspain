@@ -31,6 +31,9 @@ learned are maintained in [`AGENTS.md`](AGENTS.md).
 - OpenTelemetry call, Azure connection, response and tool spans, including
   token counts and audio byte counts. No audio, transcripts, tool arguments,
   patient identifiers or credentials are added to telemetry.
+- A separate, authenticated, read-only dashboard imported from `platform`.
+  It consumes existing observations without changing the voice runtime.
+  See [dashboard integration](#read-only-dashboard-integration).
 
 The `/ws` agent can send `/submit/*` actions for the actual `start.callSid`.
 These endpoints report what the agent would do; Prosper's underlying EHR is
@@ -486,6 +489,84 @@ need manual review/removal. Disk/serialization errors are explicit; recordings
 are never silently truncated. The earlier read-only calls cannot be reconstructed
 retroactively; their recording/transcript remains in Prosper's dashboard.
 
+## Read-only dashboard integration
+
+The frontend from `platform` commit `b5cdcfa` lives in `dashboard/`. Its design,
+navigation, call list, relationship map and patient views use real data instead
+of the original demo generator. `src/dashboard/` is a separate HTTP adapter;
+`npm start`, the `/ws` protocol, model instructions and submission safeguards
+are unchanged. Future backend commits can be merged from `main` without moving
+the frontend into the voice implementation.
+
+Start the dashboard from the repository/worktree root:
+
+```sh
+# Once, unless a private dashboard token is already configured:
+mkdir -p .local
+node --input-type=module -e 'import { randomBytes } from "node:crypto"; import { writeFileSync } from "node:fs"; writeFileSync(".local/dashboard.env", "DASHBOARD_TOKEN=" + randomBytes(32).toString("hex") + "\n", { flag: "wx", mode: 0o600 });'
+
+npm run dashboard
+# http://127.0.0.1:4321
+```
+
+Enter `DASHBOARD_TOKEN` from the private file in the login form. It is a separate
+operator credential, not the voice endpoint token or an Azure/Prosper key.
+It remains in browser memory only; no URL, cookie, local storage or session
+storage contains it. Disconnecting clears patient data. API responses are
+`no-store`, same-origin and authenticated. The dashboard binds only to loopback;
+use an SSH forward such as `ssh -L 4321:127.0.0.1:4321 your-vm` for remote access.
+Do not expose an unauthenticated static file server at the repository root.
+
+`npm run dashboard` loads `.local/dashboard.env` if present, then the normal
+backend environment. In an isolated worktree, set `DASHBOARD_ENV_DIR` in that
+private file to the existing backend checkout to reuse its configuration
+read-only without copying credentials. Relative `DASHBOARD_RECORDS_DIR` is
+resolved against that checkout. The integration never restarts the agent,
+changes its tunnel/token, creates Azure resources, invokes a model, starts a
+Prosper call or submits an action.
+
+| Source | Observations | Boundaries |
+| --- | --- | --- |
+| Local `/healthz` | Active call count, connector, deployment, recording and export status | Process health is not an inference success or a judge verdict. |
+| Private call records | Start/end, byte counts, interruption counts, technical events, received action verbs | Only a whitelisted projection is returned. No raw NDJSON, transcripts, action bodies, clinical notes or WAV downloads. A recent unclosed record is not proof that the caller is speaking. |
+| Prosper `/clinic`, `/submissions` | Catalogue and the last 200 received records, correlated by `call_id` | A receipt is not a passing verdict. `/submit` does not update the EHR. |
+| Prosper `/directory`, upcoming appointments | Explicit name/phone search and a selected patient's appointments | No bulk directory dump. DNI/NIE, birth date, clinical notes and registration demographics are excluded from browser responses. A BOOK `patient_id` can link calls; a name/phone similarity cannot establish identity or a family relationship. |
+| Azure Monitor | Supported token/audio-token usage, Realtime usage and gateway response metrics | Requires `AZURE_MONITOR_RESOURCE_ID` and the identity's metric-read permission. Scoped to the configured model deployment, not exclusively these calls. Missing samples are not zero. |
+| Foundry / Application Insights | Correlated `chat` response durations and token usage via Log Analytics | Requires `AZURE_MONITOR_WORKSPACE_ID`, a linked/exporting Application Insights resource and workspace query permission. Span duration is not caller-to-first-audio latency. Console-only traces cannot be recovered from Azure. |
+| Optional separate Speech resource | `AudioSecondsTranscribed`, `SynthesizedCharacters`, resource latency | The current agent does **not** use separate Azure Speech. An explicitly configured resource is labelled external, never attributed to voice calls. |
+
+Azure queries use `DefaultAzureCredential`, not the inference API key. Typical
+read-only roles are Monitoring Reader on the Cognitive Services resource and
+Log Analytics Reader on the workspace. Granting roles, creating/linking resources
+and enabling the agent's `APPLICATIONINSIGHTS_CONNECTION_STRING` are separate
+deployment operations, not dashboard side effects.
+
+The browser refreshes every five seconds. Metadata/health are cached for two
+seconds, Prosper receipts for fifteen, and Azure data for sixty; requests are
+coalesced rather than duplicated for each viewer. A source error stays visible
+and is never replaced with demo values. Historical statistics are explicitly a
+bounded observed sample (default seven days, up to 200 local files and 200
+receipts), not a complete population; period-over-period trends are not invented.
+The date ranges use Europe/Madrid calendar days.
+
+The metadata reader requires owner-controlled, regular, unlinked files and
+rejects symlinks. It never changes the voice process's source permissions.
+Additional permission/ACL bits (including those installed by a shared workspace)
+are surfaced as a warning, not mistaken for corrupt data. Review such access
+locally; the writer's private `0700`/`0600` policy is unchanged.
+
+Sentiment, intent confidence, MOS, jitter, packet loss, ASR accuracy, NPS, clinical
+risk and cost remain **unavailable**, not zero. The frontend's former personality
+simulation, prompt edits, outbound calls, SMS, patient creation and playback
+controls do not gain backend implementations. Configuration is read-only.
+See [`dashboard/README.md`](dashboard/README.md) for frontend ownership.
+
+Authoritative metric and query contracts:
+
+- [Cognitive Services / OpenAI / Speech metrics](https://learn.microsoft.com/en-us/azure/azure-monitor/reference/supported-metrics/microsoft-cognitiveservices-accounts-metrics)
+- [Azure Monitor Metrics REST API](https://learn.microsoft.com/en-us/rest/api/monitor/metrics/list?view=rest-monitor-2023-10-01)
+- [Log Analytics query API](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/api/request-format)
+
 ## Observability
 
 Set `APPLICATIONINSIGHTS_CONNECTION_STRING` to export explicit spans and
@@ -525,6 +606,8 @@ SDK debug or transcript logging when using patient information.
 npm run typecheck
 npm test
 npm run build
+npx playwright install chromium  # Once, for the dashboard browser checks only
+npm run test:dashboard           # Synthetic sources; no Azure/Prosper requests
 npm run check:connections
 # Invokes the model and incurs Azure usage:
 npm run check:connections -- --voice
