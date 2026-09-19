@@ -1241,6 +1241,11 @@ table.data .cell-sub {
   background: var(--parchment);
 }
 
+.signal-btn__icon {
+  width: 14px;
+  height: 14px;
+}
+
 .signal-btn.is-on {
   background: var(--pitch-black);
   border-color: var(--pitch-black);
@@ -2171,6 +2176,28 @@ table.data .cell-sub {
   font-size: 15px;
   font-weight: var(--fw-regular);
   letter-spacing: -0.02em;
+}
+
+.chat-card__name {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+}
+
+.chat-card__name .pill {
+  flex: none;
+  gap: 4px;
+  padding: 1px 7px;
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+}
+
+.chat-card__name .dot {
+  width: 5px;
+  height: 5px;
 }
 
 .chat-card__sub {

@@ -19,7 +19,7 @@ export function render(param, query) {
   let filter = STATES.some((s) => s.id === wantedState) ? wantedState : param === "directo" ? "live" : "all";
   let range = RANGES.some((r) => r.id === query?.get("rango")) ? query.get("rango") : DEFAULT_RANGE;
   let mapOpen = param === "mapa";
-  let signalsOpen = false;
+  let panel = null;
 
   const visible = () => calls.filter((c) => inRange(c, range) && matchesState(c, filter));
   let selected = visible()[0] || calls[0];
@@ -85,7 +85,7 @@ export function render(param, query) {
     if (!c) return mount(heroHost, card({}, el("div", { class: "empty" }, "Selecciona una llamada.")));
     mount(
       heroHost,
-      chatCard(c, signalsOpen, toggleSignals),
+      chatCard(c, panel, togglePanel),
       el(
         "div",
         { class: "grid grid--2" },
@@ -123,7 +123,7 @@ export function render(param, query) {
         ),
       ),
     );
-    if (signalsOpen) mount(signalsHost, ...signalsPanel(c));
+    if (panel) mount(signalsHost, ...sidePanel(panel, c));
   }
 
   const filterBar = el(
@@ -215,13 +215,12 @@ export function render(param, query) {
 
   if (mapOpen) mount(board, networkPanel(visible(), { state: filter, range }));
 
-  function toggleSignals() {
-    signalsOpen = !signalsOpen;
-    grid.classList.toggle("is-signals", signalsOpen);
-    listCard.hidden = signalsOpen;
-    signalsHost.hidden = !signalsOpen;
-    if (signalsOpen) mount(signalsHost, ...signalsPanel(selected));
-    else mount(signalsHost);
+  function togglePanel(kind) {
+    panel = panel === kind ? null : kind;
+    grid.classList.toggle("is-signals", Boolean(panel));
+    listCard.hidden = Boolean(panel);
+    signalsHost.hidden = !panel;
+    mount(signalsHost, ...(panel ? sidePanel(panel, selected) : []));
     renderHero();
   }
 
@@ -235,7 +234,7 @@ export function render(param, query) {
   );
 }
 
-function chatCard(c, signalsOpen, onToggle) {
+function chatCard(c, panel, onToggle) {
   const isLive = Boolean(c.live);
   return el(
     "section",
@@ -247,24 +246,38 @@ function chatCard(c, signalsOpen, onToggle) {
       el(
         "div",
         { style: { minWidth: 0 } },
-        el("div", { class: "chat-card__title" }, c.caller),
+        el(
+          "div",
+          { class: "chat-card__name" },
+          el("span", { class: "truncate" }, c.caller),
+          isLive
+            ? el("span", { class: "pill pill--alert" }, el("span", { class: "dot dot--pulse" }), "En curso")
+            : pill(outcomeLabels[c.outcome].text, outcomeLabels[c.outcome].pill.replace("pill--", "")),
+        ),
         el("div", { class: "chat-card__sub truncate" }, `${c.reason} · ${c.time}`),
       ),
       el(
         "div",
         { class: "row ml-auto", style: { gap: "6px" } },
-        isLive
-          ? el("span", { class: "pill pill--alert" }, el("span", { class: "dot dot--pulse" }), "En curso")
-          : pill(outcomeLabels[c.outcome].text, outcomeLabels[c.outcome].pill.replace("pill--", "")),
         el(
           "button",
           {
-            class: `signal-btn${signalsOpen ? " is-on" : ""}`,
+            class: `signal-btn${panel === "metrics" ? " is-on" : ""}`,
+            title: "Latencia, calidad de audio y comprensión de la llamada",
+            onclick: () => onToggle("metrics"),
+          },
+          icon("reports", "signal-btn__icon"),
+          panel === "metrics" ? "Ocultar analítica" : "Ver analítica",
+        ),
+        el(
+          "button",
+          {
+            class: `signal-btn${panel === "signals" ? " is-on" : ""}`,
             title: "Parámetros que el agente detecta en tiempo real",
-            onclick: onToggle,
+            onclick: () => onToggle("signals"),
           },
           el("span", { class: "signal-btn__eq" }, el("i", {}), el("i", {}), el("i", {}), el("i", {})),
-          signalsOpen ? "Ocultar señales" : "Leer señales",
+          panel === "signals" ? "Ocultar señales" : "Leer señales",
         ),
         el("button", { class: "btn btn--icon btn--ghost", title: "Descargar audio" }, icon("download", "nav__icon")),
       ),
@@ -349,6 +362,8 @@ const INTENT_MAP = {
   "Resultados analítica": [["Consultar resultados", 92], ["Solicitar interpretación", 44], ["Agendar seguimiento", 27]],
   "Autorización mutua": [["Verificar cobertura", 89], ["Consultar precio", 51], ["Urgencia administrativa", 33]],
 };
+
+const sidePanel = (kind, c) => (kind === "metrics" ? metricsPanel(c) : signalsPanel(c));
 
 export function signalsPanel(c) {
   const emo = EMOTION_PROFILE[c.sentiment];
@@ -470,6 +485,87 @@ export function signalsPanel(c) {
         { class: "row row--wrap" },
         el("button", { class: "btn btn--primary btn--sm" }, "Sugerir al agente"),
         el("button", { class: "btn btn--sm" }, "Descartar"),
+      ),
+    ),
+  ];
+}
+
+/* Salud técnica de la conversación: lo que delata si el agente responde bien en vivo */
+function metricsPanel(c) {
+  const isLive = Boolean(c.live);
+  const seed = [...c.id].reduce((a, ch) => a + ch.charCodeAt(0), 0);
+  const pick = (min, max, salt) => min + ((seed * 7 + salt * 31) % (max - min + 1));
+
+  const first = pick(380, 760, 1);
+  const p50 = pick(320, 620, 2);
+  const p95 = p50 + pick(180, 520, 3);
+  const mos = (3.6 + ((seed + 5) % 13) / 10).toFixed(1);
+  const jitter = pick(6, 28, 4);
+  const loss = ((seed % 14) / 10).toFixed(1);
+  const asr = pick(88, 98, 5);
+  const bargeIns = pick(0, 4, 6);
+  const silence = pick(2, 9, 7);
+  const turns = c.transcript.length;
+
+  const latencyTone = (ms) => (ms > 900 ? "alert" : ms > 600 ? "slate" : "denim");
+
+  return [
+    el(
+      "div",
+      { class: "signals__strip brand-wash" },
+      isLive ? el("span", { class: "dot dot--pulse" }) : el("span", { class: "dot" }),
+      el("span", {}, `${isLive ? "Midiendo en vivo" : "Analítica de la llamada"} · maio`),
+      el("span", { class: "mono" }, `${p50} ms · MOS ${mos}`),
+    ),
+
+    card(
+      { title: "Latencia de respuesta", sub: "Desde que calla el paciente hasta que habla maio" },
+      el(
+        "dl",
+        { class: "kv" },
+        el("dt", {}, "Primera respuesta"),
+        el("dd", { class: "mono" }, `${first} ms`),
+        el("dt", {}, "Mediana"),
+        el("dd", { class: "mono" }, `${p50} ms`),
+        el("dt", {}, "P95"),
+        el("dd", { class: `mono${p95 > 900 ? " text-alert" : ""}` }, `${p95} ms`),
+        el("dt", {}, "Turnos"),
+        el("dd", {}, `${turns} intervenciones`),
+      ),
+      el(
+        "div",
+        { style: { marginTop: "12px" } },
+        meter("Respuestas por debajo de 800 ms", Math.max(0, 100 - Math.round(p95 / 22)), latencyTone(p95)),
+      ),
+    ),
+
+    card(
+      { title: "Calidad de la llamada", sub: `MOS ${mos} sobre 5 · red y audio` },
+      meter("Nitidez de voz", Math.round(mos * 20), "denim"),
+      meter("Estabilidad de red", Math.max(0, 100 - jitter * 2), jitter > 20 ? "alert" : "denim"),
+      el(
+        "div",
+        { class: "chips", style: { marginTop: "10px" } },
+        el("span", { class: "signal-chip" }, "Jitter", el("b", {}, `${jitter} ms`)),
+        el("span", { class: `signal-chip${Number(loss) > 1 ? " signal-chip--hot" : ""}` }, "Pérdida", el("b", {}, `${loss}%`)),
+        el("span", { class: "signal-chip" }, "Códec", el("b", {}, "Opus 48k")),
+      ),
+    ),
+
+    card(
+      { title: "Comprensión y turno de palabra", sub: "Qué tan limpio fue el diálogo" },
+      meter("Confianza de transcripción", asr, asr < 92 ? "slate" : "denim"),
+      el(
+        "dl",
+        { class: "kv", style: { marginTop: "12px" } },
+        el("dt", {}, "Interrupciones"),
+        el("dd", { class: bargeIns > 2 ? "text-alert" : "" }, `${bargeIns} al agente`),
+        el("dt", {}, "Silencios > 2 s"),
+        el("dd", {}, String(silence)),
+        el("dt", {}, "Repeticiones"),
+        el("dd", {}, c.sentiment === "negative" ? "2 aclaraciones" : "Ninguna"),
+        el("dt", {}, "Idioma detectado"),
+        el("dd", {}, "Español (es-ES)"),
       ),
     ),
   ];
