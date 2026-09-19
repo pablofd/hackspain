@@ -157,7 +157,7 @@ export class ProsperClient {
           ...(body ? { "Content-Type": "application/json" } : {}),
         },
         ...(body ? { method: "POST", body } : {}),
-        signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
         redirect: "error",
       });
     } catch {

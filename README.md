@@ -68,6 +68,12 @@ The tool layer keeps state per call, separate from the language model:
   same payload; 410/422 are errors, never success. One confirmed POST already in
   flight may finish after hang-up within the 30-second submission window;
   unconfirmed proposals are never automatically submitted on disconnect.
+- Prosper requests may wait up to 60 seconds; reads still abort immediately on
+  caller disconnect. Each confirmed submission has a 60-second total budget,
+  including the 250 ms wait and at most one identical retry. If the call closes,
+  its already-started submissions have at most 28 more seconds, never extending
+  their original deadline or starting a different write. The 180-second call
+  limit is unchanged.
 - Registrations validate all demographics and the DNI/NIE check letter, check for
   an existing record, and send only `REGISTER`, not an invented booking.
 - `report_outcome` sends explicit `NO_ACTION`/`ESCALATE` records. API restrictions

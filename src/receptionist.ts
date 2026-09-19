@@ -185,6 +185,7 @@ export class Receptionist {
   private readonly options = new Map<string, Option>();
   private readonly appointments = new Map<string, Appointment>();
   private readonly proposals = new Map<string, Proposal>();
+  private readonly submissionClosers = new Set<() => void>();
   private readonly observedReasons = new Set<OutcomeReason>();
   private needsOtherPolicyAnswer = false;
   private readonly requests = new Map<string, SchedulingRequest>();
@@ -393,6 +394,7 @@ export class Receptionist {
   async close(): Promise<void> {
     this.closed = true;
     // Only already-confirmed writes finish in Prosper's 30-second grace window.
+    for (const closeSubmission of this.submissionClosers) closeSubmission();
     await Promise.allSettled([...this.proposals.values()].flatMap((p) => p.pending ? [p.pending] : []));
   }
 
@@ -1364,8 +1366,20 @@ export class Receptionist {
     this.call.record({ type: "action", stage: "confirmed", proposalId: proposal.id, action: proposal.action });
     proposal.status = "submitting";
     const operation = (async (): Promise<SubmissionResult> => {
-      const deadline = AbortSignal.timeout(20_000);
+      const closeGrace = new AbortController();
+      let closeTimer: NodeJS.Timeout | undefined;
+      const startCloseGrace = () => {
+        if (closeTimer !== undefined) return;
+        closeTimer = setTimeout(() => closeGrace.abort(
+          new DOMException("Submission close grace elapsed", "TimeoutError"),
+        ), 28_000);
+      };
+      const deadline = AbortSignal.any([AbortSignal.timeout(60_000), closeGrace.signal]);
+      this.submissionClosers.add(startCloseGrace);
+      this.call.signal.addEventListener("abort", startCloseGrace, { once: true });
+      if (this.closed || this.call.signal.aborted) startCloseGrace();
       try {
+        this.current(turn);
         let result: SubmissionResult;
         try {
           result = await this.api.submit(this.call.callId, proposal.action, this.call.parent, deadline);
@@ -1384,6 +1398,10 @@ export class Receptionist {
         proposal.status = code === "prosper_submission_unknown" ? "unknown" : "failed";
         this.call.record({ type: "action", stage: proposal.status, proposalId: proposal.id, action: proposal.action, code });
         throw error instanceof AppError ? error : new AppError(code);
+      } finally {
+        clearTimeout(closeTimer);
+        this.call.signal.removeEventListener("abort", startCloseGrace);
+        this.submissionClosers.delete(startCloseGrace);
       }
     })();
     proposal.pending = operation;

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { getEventListeners } from "node:events";
+import { syncBuiltinESMExports } from "node:module";
+import { setImmediate as settle, setTimeout as delay } from "node:timers/promises";
+import { test, type TestContext } from "node:test";
 import { ROOT_CONTEXT } from "@opentelemetry/api";
 import { z } from "zod";
 import { ProsperClient, type Clinic } from "../src/prosper.js";
@@ -51,7 +54,7 @@ function harness(options: {
   callId?: string;
   allowSubmissions?: boolean;
   slots?: typeof slot[];
-  post?: (body: Record<string, unknown>, attempt: number) => Promise<Response>;
+  post?: (body: Record<string, unknown>, attempt: number, init: RequestInit) => Promise<Response>;
   patients?: typeof patient[];
   appointments?: typeof appointment[];
   clinic?: typeof clinic;
@@ -75,7 +78,7 @@ function harness(options: {
       assert.equal(new Headers(init.headers).get("X-Api-Key"), "test-key");
       const body = z.record(z.string(), z.unknown()).parse(JSON.parse(String(init.body)));
       writes.push(body);
-      if (options.post) return options.post(body, writes.length);
+      if (options.post) return options.post(body, writes.length, init);
       const { call_id, ...fields } = body;
       const kind = url.pathname.split("/").at(-1)?.toUpperCase().replace("-", "_");
       const action = actionSchema.parse(kind === "REGISTER"
@@ -129,6 +132,17 @@ async function proposeBooking(h: ReturnType<typeof harness>): Promise<string> {
   );
   assert.equal(h.writes.length, 0);
   return proposal.proposal_id;
+}
+
+function mockSubmissionClock(t: TestContext) {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.timers.reset(); syncBuiltinESMExports(); });
+  return t.mock.method(AbortSignal, "timeout", (milliseconds: number) => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(new DOMException("Timed out", "TimeoutError")), milliseconds);
+    return controller.signal;
+  });
 }
 
 async function proposeScheduling(
@@ -535,6 +549,178 @@ test("a dropped acknowledgement retries the same body and treats duplicate 409 a
   assert.deepEqual(h.writes[0], h.writes[1]);
 });
 
+for (const responseDelay of [40_000, 61_000]) {
+  test(`an open call's confirmed submission ${responseDelay === 40_000 ? "can finish after forty seconds" : "expires at sixty seconds without starting another attempt"}`, async (t) => {
+    let requestSignal: AbortSignal | undefined;
+    const h = harness({ post: async (_body, _attempt, init) => {
+      assert.ok(init.signal);
+      requestSignal = init.signal;
+      await delay(responseDelay, undefined, { signal: init.signal });
+      return new Response(null, { status: 409 });
+    } });
+    const proposal = await proposeBooking(h);
+    h.nextTurn();
+    const timeouts = mockSubmissionClock(t);
+    const settled = Promise.allSettled([h.execute("confirm_action", { proposal_id: proposal, confirmed: true })]);
+    await settle();
+    t.mock.timers.tick(28_001);
+    assert.equal(requestSignal?.aborted, false);
+    t.mock.timers.tick(Math.min(responseDelay, 60_000) - 28_002);
+    assert.equal(requestSignal?.aborted, false);
+    t.mock.timers.tick(1);
+    const [result] = await settled;
+    if (responseDelay === 40_000) {
+      assert.ok(result?.status === "fulfilled");
+      assert.equal(z.object({ status: z.string() }).parse(result.value).status, "duplicate");
+    } else {
+      assert.ok(result?.status === "rejected");
+      assert.equal(result.reason.code, "prosper_submission_unknown");
+      assert.equal(requestSignal?.aborted, true);
+    }
+    assert.deepEqual(timeouts.mock.calls.map(({ arguments: args }) => args), [[60_000], [60_000]]);
+    assert.equal(h.writes.length, 1);
+    assert.equal(getEventListeners(h.controller.signal, "abort").length, 0);
+    await h.engine.close();
+    t.mock.timers.tick(60_000);
+    await settle();
+    assert.equal(h.writes.length, 1);
+  });
+}
+
+for (const disconnected of [false, true]) for (const outcome of ["duplicate", "unknown"] as const) {
+  test(`confirmed submissions share the ${disconnected ? "28-second close grace" : "60-second operation budget"} across an identical retry (${outcome})`, async (t) => {
+    const posts: RequestInit[] = [];
+    const firstDelay = disconnected ? 10_000 : 20_000;
+    const retryDelay = outcome === "duplicate"
+      ? disconnected ? 16_000 : 38_000
+      : disconnected ? 18_000 : 40_000;
+    const budget = disconnected ? 28_000 : 60_000;
+    const h = harness({ post: async (_body, attempt, init) => {
+      assert.ok(init.signal);
+      posts.push(init);
+      await delay(attempt === 1 ? firstDelay : retryDelay, undefined, { signal: init.signal });
+      if (attempt === 1) throw new TypeError("Synthetic connection failure");
+      return new Response(null, { status: 409 });
+    } });
+    const proposal = await proposeBooking(h);
+    h.nextTurn();
+    const timeouts = mockSubmissionClock(t);
+    const submitting = h.execute("confirm_action", { proposal_id: proposal, confirmed: true });
+    const settled = Promise.allSettled([submitting]);
+    await settle();
+    assert.equal(posts.length, 1);
+    if (disconnected) h.controller.abort();
+    const closing = disconnected ? h.engine.close() : undefined;
+    let closed = false;
+    void closing?.then(() => { closed = true; });
+    assert.equal(posts[0]?.signal?.aborted, false);
+
+    t.mock.timers.tick(firstDelay);
+    await settle();
+    t.mock.timers.tick(249);
+    await settle();
+    assert.equal(posts.length, 1);
+    t.mock.timers.tick(1);
+    await settle();
+    assert.equal(posts.length, 2);
+    assert.equal(posts[0]?.body, posts[1]?.body);
+    assert.deepEqual(h.writes[0], h.writes[1]);
+    assert.deepEqual(timeouts.mock.calls.map(({ arguments: args }) => args), [[60_000], [60_000], [60_000]]);
+
+    t.mock.timers.tick(Math.min(retryDelay, budget - firstDelay - 250) - 1);
+    await settle();
+    assert.equal(closed, false);
+    assert.equal(posts[1]?.signal?.aborted, false);
+    t.mock.timers.tick(1);
+    const [result] = await settled;
+    await closing;
+    if (outcome === "duplicate") {
+      assert.ok(result?.status === "fulfilled");
+      assert.equal(z.object({ status: z.string() }).parse(result.value).status, "duplicate");
+      assert.equal(posts[1]?.signal?.aborted, false);
+    } else {
+      assert.ok(result?.status === "rejected");
+      assert.equal(result.reason.code, "prosper_submission_unknown");
+      assert.equal(posts[1]?.signal?.aborted, true);
+    }
+    assert.equal(closed, disconnected);
+    assert.equal(getEventListeners(h.controller.signal, "abort").length, 0);
+    await h.engine.close();
+    t.mock.timers.tick(60_000);
+    await settle();
+    assert.equal(posts.length, 2);
+  });
+}
+
+for (const closeAt of [20_000, 45_000]) for (const trigger of ["abort", "close"] as const) {
+  test(`${trigger} at ${closeAt / 1000}s caps a pending write without resetting or extending either deadline`, async (t) => {
+    let requestSignal: AbortSignal | undefined;
+    const h = harness({ post: async (_body, _attempt, init) => {
+      assert.ok(init.signal);
+      requestSignal = init.signal;
+      await delay(90_000, undefined, { signal: init.signal });
+      return new Response(null, { status: 409 });
+    } });
+    const proposal = await proposeBooking(h);
+    h.nextTurn();
+    mockSubmissionClock(t);
+    const settled = Promise.allSettled([h.execute("confirm_action", { proposal_id: proposal, confirmed: true })]);
+    await settle();
+    t.mock.timers.tick(closeAt);
+    let closing: Promise<void> | undefined;
+    if (trigger === "abort") h.controller.abort();
+    else closing = h.engine.close();
+    assert.equal(requestSignal?.aborted, false);
+    t.mock.timers.tick(5_000);
+    if (trigger === "close") h.controller.abort();
+    closing ??= h.engine.close();
+    const repeatedClose = h.engine.close();
+    let closed = false;
+    void closing.then(() => { closed = true; });
+    t.mock.timers.tick(Math.min(60_000, closeAt + 28_000) - closeAt - 5_001);
+    await settle();
+    assert.equal(requestSignal?.aborted, false);
+    assert.equal(closed, false);
+    t.mock.timers.tick(1);
+    const [result] = await settled;
+    assert.ok(result?.status === "rejected");
+    assert.equal(result.reason.code, "prosper_submission_unknown");
+    await Promise.all([closing, repeatedClose]);
+    assert.equal(requestSignal?.aborted, true);
+    assert.equal(closed, true);
+    assert.equal(h.writes.length, 1);
+    assert.equal(getEventListeners(h.controller.signal, "abort").length, 0);
+  });
+}
+
+test("a closing call's grace cannot abort another call's forty-second confirmed write", async (t) => {
+  const post = async (_body: Record<string, unknown>, _attempt: number, init: RequestInit) => {
+    assert.ok(init.signal);
+    await delay(40_000, undefined, { signal: init.signal });
+    return new Response(null, { status: 409 });
+  };
+  const first = harness({ callId: "first-call", post });
+  const second = harness({ callId: "second-call", post });
+  const proposals = await Promise.all([proposeBooking(first), proposeBooking(second)]);
+  first.nextTurn();
+  second.nextTurn();
+  mockSubmissionClock(t);
+  const firstResult = Promise.allSettled([first.execute("confirm_action", { proposal_id: proposals[0], confirmed: true })]);
+  const secondResult = Promise.allSettled([second.execute("confirm_action", { proposal_id: proposals[1], confirmed: true })]);
+  await settle();
+  first.controller.abort();
+  const closing = first.engine.close();
+  t.mock.timers.tick(28_000);
+  assert.equal((await firstResult)[0]?.status, "rejected");
+  await closing;
+  assert.equal(second.controller.signal.aborted, false);
+  t.mock.timers.tick(12_000);
+  assert.equal((await secondResult)[0]?.status, "fulfilled");
+  await second.engine.close();
+  assert.equal(first.writes.length, 1);
+  assert.equal(second.writes.length, 1);
+});
+
 test("410 and 422 fail explicitly, never report success, and are not retried", async () => {
   for (const status of [410, 422]) {
     const h = harness({ post: async () => new Response("private upstream details", { status }) });
@@ -562,9 +748,13 @@ test("uncertain writes block replacement; diagnostics and unconfirmed disconnect
   await assert.rejects(diagnostic.execute("confirm_action", { proposal_id: diagnosticProposal, confirmed: true }));
   assert.equal(diagnostic.writes.length, 0);
   const abandoned = harness();
-  await proposeBooking(abandoned);
+  const abandonedProposal = await proposeBooking(abandoned);
+  abandoned.nextTurn();
   abandoned.controller.abort();
   await abandoned.engine.close();
+  await assert.rejects(abandoned.execute("confirm_action", {
+    proposal_id: abandonedProposal, confirmed: true,
+  }), { code: "call_cancelled" });
   assert.equal(abandoned.writes.length, 0);
 });
 
