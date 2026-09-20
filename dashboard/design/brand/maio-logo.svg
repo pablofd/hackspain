@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 208 48" fill="none" role="img" aria-label="maio">
+  <g stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M15 9h18a9 9 0 0 1 9 9v9a9 9 0 0 1-9 9H22l-9 7 2.5-7A9 9 0 0 1 6 27v-9a9 9 0 0 1 9-9Z" />
+    <path d="M15.5 26q2.75-7.5 5.5 0 2.75 7.5 5.5 0 2.75-7.5 5.5 0" />
+  </g>
+  <!-- Wordmark: Space Grotesk Medium, minúsculas, tracking -0.02em -->
+  <text x="60" y="34" fill="currentColor" font-family="Space Grotesk, SF Pro Display, -apple-system, sans-serif"
+    font-size="34" font-weight="500" letter-spacing="-0.6">maio</text>
+</svg>

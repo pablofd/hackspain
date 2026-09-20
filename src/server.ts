@@ -28,6 +28,7 @@ export function createVoiceServer(
   openVoice: VoiceFactory,
   telemetryMode: "azure" | "console",
   recordStore?: CallRecordStore,
+  options: { sendClearOnInterrupt?: boolean } = {},
 ) {
   const profile = voiceProfile(config);
   const outputGain = createMuLawGain(profile.outputGainDb);
@@ -198,7 +199,11 @@ export function createVoiceServer(
             onAudioDone: (item) => { if (!closed) audio.finish(item); },
             onInterrupt: () => {
               span?.addEvent("voice.interrupted");
-              return audio.interruptAll();
+              const interrupted = audio.interruptAll();
+              if (options.sendClearOnInterrupt && client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ event: "clear", streamSid: streamId }));
+              }
+              return interrupted;
             },
             onFailure: fail,
             onTurnDone: () => span?.addEvent(profile.connector === "live" ? "voice.backend_completed" : "voice.turn_completed"),

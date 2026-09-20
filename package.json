@@ -10,6 +10,8 @@
   "scripts": {
     "configure": "tsx scripts/configure-local.ts",
     "dev": "tsx watch src/index.ts",
+    "dashboard": "node --env-file-if-exists=.local/dashboard.env --import tsx scripts/dashboard.ts",
+    "test:dashboard": "tsx --test test/dashboard*.test.ts && tsx --test test/dashboard*.browser.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "start:realtime": "VOICE_CONNECTOR=realtime node dist/index.js",
@@ -39,6 +41,7 @@
     "@types/node": "^24.13.5",
     "@types/ws": "^8.18.1",
     "ai": "^7.0.107",
+    "playwright": "^1.63.0",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   }

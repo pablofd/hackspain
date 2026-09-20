@@ -1,0 +1,60 @@
+{
+  "name": "maio — Core Palette",
+  "version": "4.0.0",
+  "base": "Interfaz blanca; el color entra con moderación",
+  "colors": [
+    {
+      "token": "pitch-black",
+      "name": "Pitch Black",
+      "hex": "#12100E",
+      "rgb": [18, 16, 14],
+      "role": "Texto, marca, botones primarios, serie principal de gráficos"
+    },
+    {
+      "token": "parchment",
+      "name": "Parchment",
+      "hex": "#F6F0ED",
+      "rgb": [246, 240, 237],
+      "role": "Superficies suaves: hover, tarjetas tintadas, burbujas del paciente"
+    },
+    {
+      "token": "dusty-denim",
+      "name": "Dusty Denim",
+      "hex": "#748CAB",
+      "rgb": [116, 140, 171],
+      "role": "Acento de datos: series secundarias, sparklines, avatares de paciente"
+    },
+    {
+      "token": "blue-slate",
+      "name": "Blue Slate",
+      "hex": "#646E78",
+      "rgb": [100, 110, 120],
+      "role": "Texto secundario y etiquetas"
+    },
+    {
+      "token": "lipstick-red",
+      "name": "Lipstick Red",
+      "hex": "#EC0B43",
+      "rgb": [236, 11, 67],
+      "role": "Solo crítico: escalados, riesgo alto, badge de cola y tendencias negativas"
+    },
+    {
+      "token": "white",
+      "name": "White",
+      "hex": "#FFFFFF",
+      "rgb": [255, 255, 255],
+      "role": "Fondo de la plataforma y superficies de tarjeta"
+    }
+  ],
+  "forma": {
+    "radios": "0 px en todos los contenedores y controles",
+    "bordes": "Hairline de 1 px rgba(18,16,14,0.12)",
+    "sombras": "Mínimas; la jerarquía la marcan las líneas"
+  },
+  "reserved": [
+    { "token": "ink-black", "hex": "#0D1B1E", "note": "Paleta anterior" },
+    { "token": "dusty-mauve", "hex": "#A54657", "note": "Paleta anterior" },
+    { "token": "tropical-teal", "hex": "#48A9A6", "note": "Paleta anterior" },
+    { "token": "coral-glow", "hex": "#FF8552", "note": "Paleta anterior" }
+  ]
+}

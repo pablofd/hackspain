@@ -45,6 +45,7 @@ code. Use synthetic fixtures and normal API lookups instead.
 | `src/server.ts`, `src/protocol.ts`, `src/audio.ts` | Authenticated `/ws`, authoritative call ID, isolated sessions, bounded queues and interruption playback. |
 | `src/config.ts`, `.env.example` | Configuration without exposing secret values. |
 | `src/call-records.ts`, `src/call-audio.ts`, `src/telemetry.ts` | Private local transcripts/optional WAV recordings versus sanitized operational telemetry. |
+| `src/dashboard/`, `scripts/dashboard.ts`, `dashboard/` | Independent authenticated clinic-read-only adapter, platform UI and opt-in isolated browser voice demo; no production call or submission changes. |
 | `test/` | Offline Node tests with synthetic patients and fake upstream responses. |
 
 - Keep TypeScript strict; use Zod for untrusted tool arguments and API responses.
@@ -85,6 +86,15 @@ code. Use synthetic fixtures and normal API lookups instead.
 - Before restarting the active server, check `/healthz` and wait for calls to
   finish. Building `dist/` does not reload an already-running `npm start`.
   Preserve the tunnel and token; do not reset unrelated VM processes.
+- Browser voice demos must use the independent authenticated dashboard bridge,
+  server-generated `demo-...` IDs, `allowSubmissions: false` and its GET-only
+  Prosper transport. Never expose the production voice token or forward a
+  browser-controlled `start`/call ID to the production `/ws`. Tickets are
+  short-lived, one-use and origin-bound; one demo at a time and three minutes
+  maximum. No model runs on page load and no demo enters real records/scoring.
+  Ordered `clear` is opt-in for browser playback; keep production defaults.
+  Distinguish real observations, explicitly illustrative UI data and paid
+  Azure voice. Do not hide a live source error behind unlabelled sample data.
 - Update **Error history and lessons learned** below for each investigated
   failure. Record evidence, cause, correction, regression and remaining limits.
   Distinguish a local fix, an accepted API receipt and a passing judge verdict.
@@ -440,7 +450,24 @@ Escalate rather than schedule these.
   secrets or add raw patient transcripts to this file, fixtures or public issues.
 - Local NDJSON records may contain patient data. They are private Linux files
   with protected paths, mode 0600, secret redaction and conservative retention.
-  They are not served by HTTP or exported as telemetry.
+  Raw files are not served by HTTP or exported as telemetry. At the user's
+  explicit request (19 Sep), the independently authenticated dashboard may
+  project a selected synthetic challenge call's transcript: speaker, text,
+  event timestamp, item ID and recorded partial/model timing fields only.
+  Keep it out of bulk snapshots; bound it to the recent 200-file/history window,
+  500 entries and 256 KiB of projected entries. Preserve credential redaction,
+  same-origin/no-store controls and text-node rendering. NDJSON/WAV downloads,
+  raw paths/tool bodies and unapproved third-party transcript analysis remain prohibited.
+  Cancel pending reads on selection changes/disposal/disconnect and reject
+  stale responses; display missing records and source errors without synthesis.
+- At the user's subsequent explicit request, real-mode selected-call signals
+  may use bounded, identifier-filtered text with the existing Azure resource.
+  Keep this separate from the voice path: on-demand authenticated POST only,
+  no tools/clinical writes, no background history sweep, finite input/output/
+  deadline/cache/concurrency limits, and no automatic paid retry loop.
+  Strictly validate caller evidence references; label scores as textual
+  estimates and unknowns as null. Never claim measured emotions, calibrated
+  confidence, audio quality, medical judgments or judge outcomes.
 - Audio recording is separately opt-in via `CALL_AUDIO_RECORDING_ENABLED`.
   Companion WAV files preserve caller input and actually sent agent output on
   separate channels; they cannot redact spoken secrets. Keep them local/private,
@@ -469,6 +496,11 @@ problems or promote a synthetic evaluation to a Prosper judge result.
 
 | Problem/type | Observed failure and cause | Correction / regression / status |
 | --- | --- | --- |
+| Browser demo / proxy body framing (19 Sep) | Local admission passed, but the HTTPS preview returned dashboard_invalid_demo_request: the initial check rejected transfer-encoded requests even when their body was empty. | Validate the actual empty request body while still rejecting nonempty content, rather than rejecting a valid proxy framing mode. Empty/nonempty chunked regressions retain authentication, origin and no-inference-before-WebSocket checks. No production voice or clinic-write change. |
+| Browser demo / repeated WebSocket upgrade (offline, 19 Sep) | Admission/reconnect tests exposed an upgrade listener accidentally registered once per HTTP request. A later connection received a second HTTP 401 after its 101 upgrade, causing an invalid WebSocket frame. No production or Azure call was used for this reproducer. | Register upgrade handling once per server. Tests cover repeated/replayed/expired tickets, concurrent admission, origin checks, forged IDs, audio bounds, ordered clear and cleanup. A separate short synthetic Azure greeting loopback then produced both generated voice and recognized input with zero clinic writes, zero real call records and no Prosper run. This is demo transport evidence, not a judge verdict. |
+| Dashboard / requested transcript display (19 Sep) | The metadata-only dashboard intentionally showed a private-transcript placeholder, preventing the user's explicitly requested inspection of synthetic challenge conversations. This was a UI policy choice, not a voice or Prosper failure. | Added a separate authenticated, bounded selected-call transcript projection and safe text view, with credential redaction, partial/generated-text caveats, live refresh and stale-response cancellation. Synthetic API/browser regressions cover auth, unsafe/malformed sources, bounds, XSS text, updates and selection/session races; snapshots remain metadata-only and raw NDJSON/WAV stay private. No inference, submitted action, server restart or judge verdict is involved. |
+| Dashboard metadata / inherited ACLs (19 Sep) | A first read rejected the existing owner-controlled records because the shared workspace adds named ACLs and expands permission-mask bits. The untouched backend's two exact-mode fixtures also fail under that inherited ACL, not because of the integration. | Read only a bounded whitelisted projection, retain owner/no-follow/link checks, surface additional source permissions and never chmod the voice process's files. Synthetic ACL coverage and real metadata reads succeed; the existing 28 recording regressions pass in an isolated fixture directory without inherited ACLs. No recording writer or voice behavior changed. |
+| Dashboard integration / simulated observability (19 Sep) | The uploaded platform generated patients, sentiment, response timings, MOS and ASR scores, and offered controls with no backend implementation. Treating these as telemetry would misrepresent actual calls; a name-based map could also join unrelated patients. | Replaced demo imports with a separately authenticated read-only adapter, exact BOOK patient-ID links, source/error states and explicit unavailable metrics. Raw NDJSON/WAV and structured registration demographics remain private; selected transcript display was subsequently authorized as documented above. No new model inference or clinic writes. Offline projection/authentication/Monitor and synthetic browser coverage; a read-only Azure query returned real audio/token usage, while missing latency samples remain unavailable. No agent change or judge result is claimed. |
 | `nearest_site` / exact address and postcode handling (private run, 19 Sep 20:36 UTC) | The updated flow passed two of four cases. Both remaining failures reached 180 seconds before consent/submission: one was offered different portal numbers and later rejected a postcode-bearing address; another was made to choose from fuzzy results despite an exact address being present. No provider failure was recorded in these two; passing calls also carried connection_lost. | Resolve only a unique fully matching address from validated point metadata, filter wrong-street/number distractors, preserve genuine ambiguity and normalize public postcode/municipality fields without weakening identifier/privacy guards. Synthetic regressions cover postal separators, metadata conflicts, bounds/cancellation and negative identities; controlled public-address reads resolve exact points without patient identifiers. No nearby-house/centroid substitution or unverified Find fallback; absent exact upstream coverage remains a limit. New judge validation is pending. |
 | Identification / identifier field confusion (nearest-site follow-up, 19 Sep) | A failed call spent an extra exchange correcting the agent's claim that a supplied DNI was an incomplete phone. The old tool arguments are unavailable, but a synthetic reproduction confirms that a complete DNI in the phone field loses the usable lookup and is not verified. | Only checksum-valid DNI/NIE-shaped phone values are retyped as national_id without changing their value. Conflicting explicit IDs and bad letters fail before network; a repeated ID never becomes two factors, and normal phone/name verification remains. Correction diagnostics are value-free. Synthetic regressions pass; no private-case identity or guessed value is embedded. |
 | `the_questions` / correct facts, no subsequent action (private run, 19 Sep 19:31 UTC) | One of four cases ended with missing_record. The caller asked which site opens Saturday; both successful catalogue reads and the generated answer identify the correct site/hours. The emitted agent channel contains the complete answer before the caller interrupts; an independent ASR check of only this public-facts audio corroborates it. The caller nevertheless abandoned without identity, a booking request or consent. No submission was attempted or failed. | No local factual defect is demonstrated, and remote hearing/private caller criteria remain unknown. Do not invent a default NO_ACTION or a booking to manufacture a record. Preserve the evidence and reproduce with a public case before attributing a platform/recognition fault. No patient audio or identifiers were sent in the isolated, write-disabled audio audit. |

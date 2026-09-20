@@ -31,6 +31,9 @@ learned are maintained in [`AGENTS.md`](AGENTS.md).
 - OpenTelemetry call, Azure connection, response and tool spans, including
   token counts and audio byte counts. No audio, transcripts, tool arguments,
   patient identifiers or credentials are added to telemetry.
+- A separate, authenticated, read-only dashboard imported from `platform`.
+  It consumes existing observations without changing the voice runtime.
+  See [dashboard integration](#read-only-dashboard-integration).
 
 The `/ws` agent can send `/submit/*` actions for the actual `start.callSid`.
 These endpoints report what the agent would do; Prosper's underlying EHR is
@@ -530,7 +533,9 @@ model, runtime instructions or concurrency limit during the ingress comparison.
 ## Private call records
 
 On the Linux VM, call transcripts/actions are recorded by default under
-`.local/calls/`, which is ignored by Git and never served over HTTP. Directories
+`.local/calls/`, which is ignored by Git and never served as files over HTTP. The
+authenticated dashboard can project a selected call's transcript as described
+below; raw NDJSON and WAV remain private. Directories
 use `0700` and files `0600`. Known credentials are redacted from the JSON records
 before serialization. Audio recording is a separate, explicit opt-in. This
 storage implementation uses Linux `/proc` for safe descriptor-based file access;
@@ -603,6 +608,243 @@ need manual review/removal. Disk/serialization errors are explicit; recordings
 are never silently truncated. The earlier read-only calls cannot be reconstructed
 retroactively; their recording/transcript remains in Prosper's dashboard.
 
+## Read-only dashboard integration
+
+The frontend from `platform` commit `b5cdcfa` lives in `dashboard/`. Its design,
+navigation, call list, relationship map and patient views use real data instead
+of the original demo generator. `src/dashboard/` is a separate HTTP adapter;
+`npm start`, the `/ws` protocol, model instructions and submission safeguards
+are unchanged. Future backend commits can be merged from `main` without moving
+the frontend into the voice implementation.
+
+Start the dashboard from the repository/worktree root:
+
+```sh
+# Once, unless a private dashboard token is already configured:
+mkdir -p .local
+node --input-type=module -e 'import { randomBytes } from "node:crypto"; import { writeFileSync } from "node:fs"; writeFileSync(".local/dashboard.env", "DASHBOARD_TOKEN=" + randomBytes(32).toString("hex") + "\n", { flag: "wx", mode: 0o600 });'
+
+npm run dashboard
+# http://127.0.0.1:4321
+```
+
+Enter `DASHBOARD_TOKEN` from the private file in the login form. It is a separate
+operator credential, not the voice endpoint token or an Azure/Prosper key.
+It remains in browser memory only; no URL, cookie, local storage or session
+storage contains it. Disconnecting clears patient data. API responses are
+`no-store`, same-origin and authenticated. The dashboard binds only to loopback;
+use an SSH forward such as `ssh -L 4321:127.0.0.1:4321 your-vm` for remote access.
+Do not expose an unauthenticated static file server at the repository root.
+
+`npm run dashboard` loads `.local/dashboard.env` if present, then the normal
+backend environment. In an isolated worktree, set `DASHBOARD_ENV_DIR` in that
+private file to the existing backend checkout to reuse its configuration
+read-only without copying credentials. Relative `DASHBOARD_RECORDS_DIR` is
+resolved against that checkout. The integration never restarts the agent,
+changes its tunnel/token, creates Azure resources, starts a Prosper call or
+submits a clinic action. Loading the dashboard does not invoke a model. The
+explicit browser voice demo and selected-call signal analysis below are the
+only opt-in inference features.
+
+| Source | Observations | Boundaries |
+| --- | --- | --- |
+| Local `/healthz` | Active call count, connector, deployment, recording and export status | Process health is not an inference success or a judge verdict. |
+| Private call records | Start/end, byte counts, interruption counts, technical events, received action verbs; selected-call transcript through its own authenticated endpoint | Bulk snapshots contain metadata only. No raw NDJSON, action bodies, tool details, file paths or WAV downloads. A recent unclosed record is not proof that the caller is speaking. |
+| Prosper `/clinic`, `/submissions` | Catalogue and the last 200 received records, correlated by `call_id` | A receipt is not a passing verdict. `/submit` does not update the EHR. |
+| Prosper `/directory`, upcoming appointments | Explicit name/phone search and a selected patient's appointments | No bulk directory dump. DNI/NIE, birth date, clinical notes and registration demographics are excluded from these structured responses. A BOOK `patient_id` can link calls; a name/phone similarity cannot establish identity or a family relationship. |
+| Azure Monitor | Supported token/audio-token usage, Realtime usage and gateway response metrics | Requires `AZURE_MONITOR_RESOURCE_ID` and the identity's metric-read permission. Scoped to the configured model deployment, not exclusively these calls. Missing samples are not zero. |
+| Foundry / Application Insights | Correlated `chat` response durations and token usage via Log Analytics | Requires `AZURE_MONITOR_WORKSPACE_ID`, a linked/exporting Application Insights resource and workspace query permission. Span duration is not caller-to-first-audio latency. Console-only traces cannot be recovered from Azure. |
+| Optional separate Speech resource | `AudioSecondsTranscribed`, `SynthesizedCharacters`, resource latency | The current agent does **not** use separate Azure Speech. An explicitly configured resource is labelled external, never attributed to voice calls. |
+
+Azure queries use `DefaultAzureCredential`, not the inference API key. Typical
+read-only roles are Monitoring Reader on the Cognitive Services resource and
+Log Analytics Reader on the workspace. Granting roles, creating/linking resources
+and enabling the agent's `APPLICATIONINSIGHTS_CONNECTION_STRING` are separate
+deployment operations, not dashboard side effects.
+
+The browser refreshes every five seconds. Metadata/health are cached for two
+seconds, Prosper receipts for fifteen, and Azure data for sixty; requests are
+coalesced rather than duplicated for each viewer. A source error stays visible
+and is never replaced with demo values. Historical statistics are explicitly a
+bounded observed sample (default seven days, up to 200 local files and 200
+receipts), not a complete population; period-over-period trends are not invented.
+The date ranges use Europe/Madrid calendar days.
+
+### Browser voice demo
+
+The **Llamada fake** control is an isolated browser conversation, not a Prosper
+call. It uses the PC's microphone and the configured Azure voice model, so
+**Azure inference is real and billable**. Microphone permission and an explicit
+click are required; opening the page, looking at example data or issuing an
+unused connection ticket does not start inference.
+
+The authenticated, same-origin `POST /api/dashboard/demo-call` accepts no body.
+An empty chunked request from a reverse proxy is valid; an actual body is rejected.
+It returns a server-owned `demo-...` call ID, a one-use 30-second ticket, codec
+metadata and `/api/dashboard/demo-call/ws`. The WebSocket uses the
+`maio-demo` subprotocol plus that ticket; neither the dashboard token nor the
+voice endpoint token belongs in its URL. The ticket is bound to the browser's
+origin. One call/reservation is allowed at a time; the existing three-minute
+voice deadline and bounded audio queues still apply.
+
+The browser captures mono audio, resamples to 8 kHz and sends exact 160-byte
+G.711 mu-law frames. The server supplies the existing decoder's lookup table,
+so the browser does not need a separate codec service. Playback and microphone
+resources are stopped on hangup, disconnect or error. Use HTTPS or a loopback
+URL such as `http://127.0.0.1:4321`; ordinary HTTP on a remote VM IP is not a
+secure microphone context. Headphones help avoid acoustic feedback.
+
+The backend reuses the working voice bridge on an independent private loopback
+port and forces `allowSubmissions: false` for every demo. A second, GET-only
+Prosper transport rejects all submissions and run-management paths before any
+request can leave the process. The demo may read the real clinic catalogue and
+directory, but cannot book, cancel, move or register a patient. Do not replace
+this with a browser connection to the production `/ws` using a fabricated ID.
+
+Demo transcripts are projected and credential-redacted in memory, streamed only
+to the authenticated demo socket, and bounded to 500 entries / 256 KiB. No demo
+NDJSON/WAV is added to real call history or scoring; no extra model analyzes
+the text. Azure's resource-level usage metrics do include the actual inference.
+`clear` is opt-in on this private bridge and is sent in the same ordered stream
+as its media frames; the production Prosper transport remains unchanged.
+
+Real clinical data, explicit illustrative presentation data and the real Azure
+voice demo are separate concepts. An example chart is not measured call quality,
+a demo conversation is not a judge verdict, and no illustrative UI action
+modifies the real agent or clinic.
+
+### Person map
+
+The map groups calls only through patient IDs already present in received
+records, never by a similar name or telephone. Unlinked calls remain in the
+call list rather than becoming invented people. It shows at most twelve
+people per page, labelled by their resolved name or an explicit patient alias.
+Stable radial slots surround the central maio logo at deliberately varied
+distances, so the people remain dispersed rather than forming a crowded ring.
+Paging discloses the total; the same state/date filters remain.
+
+Hover, keyboard focus or click opens the person card. It includes available
+profile information, actual call IDs/times/durations/results, and a targeted
+read of that patient's upcoming EHR appointments. The last reported BOOK is
+labelled separately from the read-only EHR agenda. A name not already resolved
+through an explicit patient lookup is shown as an alias, not guessed from a
+transcript; unavailable real profile fields remain explicit.
+
+Demo portraits are locally served, CC0-labelled Pravatar placeholders documented
+under `dashboard/design/portraits/LICENSE.txt`. They are illustrative, **not
+photos of the represented patients**. Real profiles without an actual photo use
+Phosphor's Finn the Human icon instead. No names, IDs or phone numbers are sent
+to an avatar service. Demo-visual profiles and appointments remain simulated.
+
+### Selected-call transcripts
+
+At the user's explicit request for these synthetic challenge conversations,
+`GET /api/dashboard/calls/{callId}/transcript` now returns a bounded text
+projection behind the **same independent dashboard token**, same-origin checks
+and `no-store` policy. This replaces the former transcript-hidden UI decision,
+not the authentication or raw-recording privacy boundary.
+
+The JSON shape is `{ callId, checkedAt, historyDays, entries, limited, limits }`.
+Each entry contains only `speaker` (`user` or `assistant`), `text`, `timestamp`
+and `itemId`, plus recorded `partial`, `startMs` and `endMs` when present.
+`limits` is `{ entries: 500, bytes: 262144 }`: the newest 500 events at most,
+within 256 KiB of projected UTF-8 JSON entries. `limited: true` explicitly warns
+that older fragments were omitted. The latest matching record must be among
+the same 200 recent local files and configured history window as the snapshot
+(default seven days, maximum thirty). Source files remain capped at 8 MiB and
+complete event lines at 64 KiB; unfinished appended lines are not invented.
+
+No transcript is added to `/api/dashboard/snapshot` or fetched for every call.
+Viewing a transcript alone does not send it to a model; the separately
+requested signal-analysis feature below has its own bounded/redacted input.
+Known configured credentials are
+redacted again when projecting text and item IDs; existing redaction stays in
+place. Synthetic patient statements, including identifiers spoken in them, may
+appear in this explicitly authorized transcript view. Structured directory,
+receipt and tool fields remain excluded as before.
+
+The selected call refreshes with the existing five-second cycle. Selection
+changes, hiding the detail in the map, navigation and disconnect abort pending
+requests; late responses cannot replace another selection or session. Rendering
+uses DOM text nodes, not HTML. Whitespace, repeated words and partial fragments
+are preserved, not merged into invented turns. Speakers are labelled as the
+interlocutor and agent; partial text may be incomplete/interrupted, and **agent
+text is generated, not verified as heard**. Event timestamps are not exact
+acoustic timings; optional model intervals do not prove playback either.
+
+The UI distinguishes loading, an empty transcript, an unavailable local record
+and source errors. The API returns `401` without a valid token, `400` for an
+invalid call ID/query, `404` when no local record is in the bounded sample, and
+`503` for unsafe/unreadable/invalid source records. A Prosper receipt without a
+local record does not supply any conversation text.
+
+The shared metadata/transcript reader requires owner-controlled, regular, unlinked files and
+rejects symlinks. It never changes the voice process's source permissions.
+Additional permission/ACL bits (including those installed by a shared workspace)
+are surfaced as a warning, not mistaken for corrupt data. Review such access
+locally; the writer's private `0700`/`0600` policy is unchanged.
+
+Emotion, calibrated intent confidence, MOS, jitter, packet loss, ASR accuracy,
+NPS, clinical risk and cost remain **unmeasured**, not zero. Explicit visual examples do not
+turn them into real telemetry. Prompt edits, outbound telephone calls, SMS,
+patient creation and historical WAV playback do not gain clinic write
+implementations. Configuration remains read-only; the browser voice demo is
+the separate, opt-in feature described above.
+See [`dashboard/README.md`](dashboard/README.md) for frontend ownership.
+
+### Real-mode textual signals
+
+At the user's explicit request, opening **Señales** for a selected real call
+can request `POST /api/dashboard/calls/{callId}/signals`. The endpoint requires
+the independent dashboard token, same origin and an empty body; it never accepts
+a client-supplied transcript or model instructions. GET does not trigger
+inference. No analysis runs when the page loads, in visual-demo mode, or for
+every row in the call list.
+
+`DASHBOARD_SIGNALS_ENABLED=true` enables this feature.
+`DASHBOARD_SIGNALS_DEPLOYMENT` defaults to the already deployed `gpt-5.4-mini`
+on the same Azure OpenAI resource; it does not change the voice model. Requests
+use the Responses API, no tools, `store:false`, a 20-second deadline and at most
+2,500 output tokens. This is separate **paid text inference**, not an Azure
+Monitor measurement or a clinic write.
+
+The service uses at most 60 recent transcript entries and 12,000 characters,
+with at most 1,600 characters per entry. Configured credentials and recognizable
+direct identifiers, URLs and name sequences are filtered before inference.
+This reduces identifying data; it is not a guarantee of complete anonymization.
+The authorized input can still describe the conversation's clinical topic.
+No audio, chart notes, demographics or raw tool arguments are added. Coverage
+and truncation are explicit.
+
+The response contains a perceived text tone, nullable calmness/satisfaction/
+confusion indicators, qualitative intent confidence, conversation-pattern
+tags and redacted evidence excerpts. All non-null indicators, intents and
+patterns must cite supplied caller-entry IDs; invented or assistant-only
+evidence is rejected. Outputs are strictly schema-validated and contain no
+free-form medical advice. Transcript text is untrusted data, not instructions.
+
+These are **textual estimates**, not actual emotional measurements, acoustic
+quality, diagnoses, calibrated probabilities, booking authorization or judge
+verdicts. Null means insufficient evidence, never zero. Assistant text is only
+context: generated text and an accepted API receipt cannot establish what the
+caller heard or whether they were satisfied.
+
+Identical redacted input reuses an in-memory cached result. Changed input is
+analyzed no more than once per 30 seconds per call; an older result is explicitly
+marked stale during that interval. Concurrent viewers share the same request,
+only one model analysis runs at a time, and the cache is capped at 128 calls.
+Failures are explicit and are not retried by polling during the cooldown.
+Closing a panel aborts its browser wait; an already issued bounded shared model
+request may finish and populate the cache. No result is fed back into the
+receptionist or used to submit actions. Browser demo conversations are ephemeral
+and do not create the local real-call records this endpoint requires.
+
+Authoritative metric and query contracts:
+
+- [Cognitive Services / OpenAI / Speech metrics](https://learn.microsoft.com/en-us/azure/azure-monitor/reference/supported-metrics/microsoft-cognitiveservices-accounts-metrics)
+- [Azure Monitor Metrics REST API](https://learn.microsoft.com/en-us/rest/api/monitor/metrics/list?view=rest-monitor-2023-10-01)
+- [Log Analytics query API](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/api/request-format)
+
 ## Observability
 
 Set `APPLICATIONINSIGHTS_CONNECTION_STRING` to export explicit spans and
@@ -642,6 +884,8 @@ SDK debug or transcript logging when using patient information.
 npm run typecheck
 npm test
 npm run build
+npx playwright install chromium  # Once, for the dashboard browser checks only
+npm run test:dashboard           # Synthetic sources; no Azure/Prosper requests
 npm run check:connections
 # Invokes the model and incurs Azure usage:
 npm run check:connections -- --voice

@@ -32,6 +32,37 @@ test("endpoint authentication is required and never accepts a prefix match", () 
   assert.ok(!validAuthorization(`Basic ${token}`, token));
 });
 
+test("wire clear is opt-in for browser playback and leaves the production protocol unchanged", async () => {
+  for (const enabled of [false, true]) {
+    const settings = config();
+    const ready = Promise.withResolvers<Parameters<VoiceFactory>[0]>();
+    const server = createVoiceServer(settings, async (call) => {
+      ready.resolve(call);
+      return { sendAudio() {}, sendText() {}, async close() {} };
+    }, "console", undefined, { sendClearOnInterrupt: enabled });
+    const port = await server.listen();
+    try {
+      const packets: Record<string, unknown>[] = [];
+      const client = new WebSocket(`ws://127.0.0.1:${port}/ws`, {
+        headers: { Authorization: `Bearer ${settings.VOICE_ENDPOINT_TOKEN}` },
+      });
+      client.on("message", (raw) => packets.push(z.record(z.string(), z.unknown()).parse(JSON.parse(raw.toString()))));
+      await once(client, "open");
+      client.send(JSON.stringify(start(`wire-clear-${enabled}`)));
+      const call = await ready.promise;
+      const firstFrame = once(client, "message");
+      call.onAudio({ audio: Buffer.alloc(640, 0xd0), itemId: "interrupted-audio", contentIndex: 0 });
+      await firstFrame;
+      const interrupted = call.onInterrupt();
+      assert.ok(interrupted?.[0] && interrupted[0].audioEndMs > 0 && interrupted[0].audioEndMs <= 80);
+      await delay(60);
+      assert.equal(packets.filter((packet) => packet.event === "clear").length, enabled ? 1 : 0);
+      const closed = once(client, "close");
+      client.send(JSON.stringify({ event: "stop", streamSid: `stream-wire-clear-${enabled}` }));
+      await closed;
+    } finally { await server.close(); }
+  }
+});
 async function exerciseConcurrentCalls(count: number, recordAudio = false): Promise<void> {
   const directory = recordAudio ? mkdtempSync(join(tmpdir(), "hackspain-parallel-audio-")) : undefined;
   const settings = config(recordAudio ? { CALL_RECORDING_ENABLED: "true", CALL_AUDIO_RECORDING_ENABLED: "true" } : {});
