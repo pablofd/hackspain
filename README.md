@@ -1,4 +1,44 @@
+**Acceso al dashboard:** por seguridad está protegido con un token privado. Contacta por WhatsApp al **658 709 642** para solicitar acceso. No publiques el token ni uses claves de Azure o Prosper para entrar.
+
 # Cachopo - Foundry voice receptionist
+
+## Evaluar el dashboard y el agente juntos
+
+La rama `integration/dashboard-main` reúne el dashboard funcional de
+`integration/dashboard-platform` y el backend actualizado de
+`integration/dashboard`, incluida la configuración de voz Cedar. La rama
+`platform` es únicamente el mockup; no es el submission integrado.
+
+Desde la raíz del repositorio, con Node.js 24+:
+
+```sh
+npm ci
+# Configurar las credenciales privadas siguiendo Setup, más abajo.
+npm run build
+npm start                         # Terminal 1: backend, 127.0.0.1:7860
+npm run dashboard                 # Terminal 2: dashboard, 127.0.0.1:4321
+```
+
+Configura el token independiente en `.local/dashboard.env` siguiendo
+[dashboard integration](#read-only-dashboard-integration). Ambos procesos
+deben permanecer activos. El selector **Demo visual** muestra datos ficticios;
+**Datos reales** consulta las fuentes autenticadas. La llamada con micrófono
+usa Azure de pago, pero no envía acciones clínicas.
+
+### Despliegue en Vercel
+
+El frontend es estático (`dashboard/`), pero desplegar solo esa carpeta **no
+despliega el backend**. El adaptador Node del dashboard necesita acceso a los
+registros privados locales, credenciales y una conexión WebSocket persistente
+para las llamadas. Mantén ambos procesos en la VM detrás de HTTPS/WSS.
+
+Esta integración conserva peticiones `/api/dashboard/*` y WebSocket del mismo
+origen. Antes de publicar el frontend en Vercel hay que configurar y comprobar
+el enrutamiento hacia ese adaptador, incluido el upgrade WebSocket; un hosting
+estático sin ese enrutamiento no permite iniciar sesión ni llamar. No se ha
+validado aún un despliegue Vercel. Para evaluar ahora, usa el servidor integrado
+en `4321` mediante un proxy HTTPS o un túnel SSH autorizado. Nunca publiques
+`.env.local`, `.local/`, grabaciones ni tokens como variables del frontend.
 
 A TypeScript backend for the Prosper HackSpain challenge. It adapts Prosper's
 Twilio Media Streams protocol to Azure OpenAI Realtime in Foundry by default, following
