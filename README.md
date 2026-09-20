@@ -2,10 +2,13 @@
 
 # Cachopo - Foundry voice receptionist
 
-[**Ver vídeo de la demo en YouTube**](https://www.youtube.com/watch?v=6RbtG0iDtu0)
+## Acceso al dashboard y vídeo de la demo
 
-[**Abrir dashboard de la demo**](https://contrary-upper-heritage-phpbb.trycloudflare.com/)
-· Acceso directo por túnel HTTPS a esta VM, sin pasar por Vercel. Requiere el
+- **Dashboard:** https://contrary-upper-heritage-phpbb.trycloudflare.com/
+- **Vídeo de YouTube:** https://www.youtube.com/watch?v=6RbtG0iDtu0
+
+El acceso al dashboard es el enlace anterior, **no Vercel**. Conecta
+directamente por túnel HTTPS a esta VM. Requiere el
 token privado renovado. Enlace temporal: funciona mientras la VM, el dashboard
 y el túnel permanezcan activos; puede cambiar al reiniciar el túnel.
 
