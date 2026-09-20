@@ -4,9 +4,15 @@
 
 [**Ver vídeo de la demo en YouTube**](https://www.youtube.com/watch?v=6RbtG0iDtu0)
 
-[Abrir dashboard](https://hackspain-git-main-pablofds-projects.vercel.app/)
-· Requiere un despliegue operativo y el token privado. Este enlace de rama puede
-pedir además acceso a Vercel; para visitantes utiliza el dominio de producción.
+[**Abrir dashboard de la demo**](https://contrary-upper-heritage-phpbb.trycloudflare.com/)
+· Acceso directo por túnel HTTPS a esta VM, sin pasar por Vercel. Requiere el
+token privado renovado. Enlace temporal: funciona mientras la VM, el dashboard
+y el túnel permanezcan activos; puede cambiar al reiniciar el túnel.
+
+El túnel publica únicamente el adaptador del dashboard en `127.0.0.1:4321`,
+incluido su puente autenticado de llamadas demo. No publica el endpoint de voz
+de producción de `7860`, archivos privados ni grabaciones. Vercel es una
+alternativa de despliegue, no un requisito para probar esta demo.
 
 ## Evaluar el dashboard y el agente juntos
 
