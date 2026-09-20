@@ -4,11 +4,13 @@
 
 ## Acceso al dashboard y vídeo de la demo
 
-- **Dashboard:** https://contrary-upper-heritage-phpbb.trycloudflare.com/
+- **Dashboard público:** https://espionage-transport-prevalent.ngrok-free.dev/
 - **Vídeo de YouTube:** https://www.youtube.com/watch?v=6RbtG0iDtu0
 
-El acceso al dashboard es el enlace anterior, **no Vercel**. Conecta
-directamente por túnel HTTPS a esta VM. Requiere el
+El acceso al dashboard es el enlace anterior, **no Vercel ni localhost**.
+Cualquier visitante puede abrirlo desde Internet. Si ngrok muestra una pantalla
+de aviso, pulsa **Visit Site**. Conecta directamente por túnel HTTPS a esta VM.
+Las llamadas y datos siguen protegidos: requiere el
 token privado renovado. Enlace temporal: funciona mientras la VM, el dashboard
 y el túnel permanezcan activos; puede cambiar al reiniciar el túnel.
 
