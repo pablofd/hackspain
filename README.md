@@ -1,14 +1,19 @@
 **Acceso al dashboard:** por seguridad está protegido con un token privado. Contacta por WhatsApp al **658 709 642** para solicitar acceso. No publiques el token ni uses claves de Azure o Prosper para entrar.
 
-https://hackspain-git-main-pablofds-projects.vercel.app/
-https://youtu.be/6RbtG0iDtu0
 # Cachopo - Foundry voice receptionist
+
+[**Ver vídeo de la demo en YouTube**](https://www.youtube.com/watch?v=6RbtG0iDtu0)
+
+[Abrir dashboard](https://hackspain-git-main-pablofds-projects.vercel.app/)
+· Requiere un despliegue operativo y el token privado. Este enlace de rama puede
+pedir además acceso a Vercel; para visitantes utiliza el dominio de producción.
 
 ## Evaluar el dashboard y el agente juntos
 
-La rama `integration/dashboard-main` reúne el dashboard funcional de
+`main` incorpora mediante la PR #1 el dashboard funcional de
 `integration/dashboard-platform` y el backend actualizado de
-`integration/dashboard`, incluida la configuración de voz Cedar. La rama
+`integration/dashboard`, incluida la configuración de voz Cedar. La integración
+se prepara en `integration/dashboard-main`. La rama
 `platform` es únicamente el mockup; no es el submission integrado.
 
 Desde la raíz del repositorio, con Node.js 24+:
@@ -34,7 +39,7 @@ despliega el backend**. El adaptador Node del dashboard necesita acceso a los
 registros privados locales, credenciales y una conexión WebSocket persistente
 para las llamadas. Mantén ambos procesos en la VM detrás de HTTPS/WSS.
 
-Importa esta rama en Vercel con la raíz del repositorio y el preset **Other**.
+Importa `main` en Vercel con la raíz del repositorio y el preset **Other**.
 `vercel.json` ejecuta `npm run build:dashboard` y genera Build Output API v3.
 Configura en Vercel **solo** `DASHBOARD_BACKEND_ORIGIN`, por ejemplo
 `https://dashboard-backend.example.com` (sin barra final), apuntando al
@@ -57,6 +62,51 @@ el formulario y este permanece solo en memoria.
 Después del despliegue, comprueba login, Configuración, Señales y una llamada
 con micrófono solicitada explícitamente. La preparación se prueba localmente;
 no se afirma que se haya publicado o verificado una URL Vercel real.
+
+#### Ajustes exactos para el proyecto existente
+
+| Vercel → Settings | Valor |
+| --- | --- |
+| Git → Production Branch | `main` |
+| Build and Deployment → Root Directory | Raíz del repositorio, no `dashboard/` |
+| Framework Preset | `Other` |
+| Build Command | `npm run build:dashboard` (definido en `vercel.json`) |
+| Install Command | `npm ci` |
+| Output Directory | Sin override; el script genera `.vercel/output` con Build Output API v3 |
+| Node.js Version | `24.x` |
+| Environment Variables → `DASHBOARD_BACKEND_ORIGIN` | Origen HTTPS público del adaptador de `4321`, sin `/` final, usuario, contraseña ni ruta |
+
+Selecciona **Production** para la variable y también **Preview** si quieres
+compilar previews. Después abre **Deployments → último despliegue de main →
+Redeploy**. Los cambios de variables no actualizan despliegues anteriores.
+No uses `npm start` como Build Command: abre el servidor de voz, no genera el
+frontend.
+
+**Primero debe existir el backend público.** Un `127.0.0.1:4321` de la VM no
+es accesible desde Vercel ni desde el navegador del visitante. Configura un
+dominio HTTPS estable con un proxy hacia ese puerto, incluyendo WSS, y conserva
+los procesos `npm start` y `npm run dashboard` en la VM. No redirijas al puerto
+`7860`: allí no existe `/api/dashboard/snapshot`. Sin
+`DASHBOARD_BACKEND_ORIGIN` el build falla explícitamente en lugar de publicar
+un login que no pueda conectar.
+
+**Acceso de los evaluadores.** En **Settings → Domains**, copia el dominio de
+producción y úsalo también como `DASHBOARD_PUBLIC_ORIGIN` en la VM. Revisa
+**Settings → Deployment Protection → Vercel Authentication**: para que alguien
+sin cuenta del equipo entre, el dominio que compartas no debe exigir ese login
+(o debes concederle acceso mediante las opciones de Vercel). Desactivar esa
+barrera para producción no elimina nuestro formulario ni el token: la API
+sigue autenticada. No añadas tokens de bypass a URLs públicas.
+
+**Token expuesto anteriormente:** si se publicó en un README, considéralo
+comprometido aunque ya se haya retirado de la última versión. Sustituye
+`DASHBOARD_TOKEN` por uno nuevo y aleatorio en la configuración privada de la
+VM, reinicia solo el dashboard sin llamadas demo activas y distribúyelo por
+privado. No vuelvas a publicar el valor ni lo configures en el frontend.
+
+Si sigue fallando, abre los **Build Logs** del despliegue concreto. Un estado
+fallido en GitHub no identifica por sí solo la causa; el login SSO de Vercel es
+otra barrera distinta del build y del token del dashboard.
 
 A TypeScript backend for the Prosper HackSpain challenge. It adapts Prosper's
 Twilio Media Streams protocol to Azure OpenAI Realtime in Foundry by default, following
