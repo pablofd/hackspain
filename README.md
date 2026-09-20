@@ -1,5 +1,6 @@
+**Acceso al dashboard:** por seguridad está protegido con un token privado. Contacta por WhatsApp al **658 709 642** para solicitar acceso. No publiques el token ni uses claves de Azure o Prosper para entrar.
+
 https://hackspain-git-main-pablofds-projects.vercel.app/
-1812d1a97211d22aae243259df9e7672bdf6dc08a3629313802789ac03150774
 https://youtu.be/6RbtG0iDtu0
 # Cachopo - Foundry voice receptionist
 
