@@ -4,6 +4,7 @@
 env.local.save
 node_modules/
 dist/
+.vercel/
 coverage/
 *.log
 .azure/

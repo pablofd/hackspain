@@ -11,6 +11,7 @@
     "configure": "tsx scripts/configure-local.ts",
     "dev": "tsx watch src/index.ts",
     "dashboard": "node --env-file-if-exists=.local/dashboard.env --import tsx scripts/dashboard.ts",
+    "build:dashboard": "node scripts/build-dashboard-vercel.mjs",
     "test:dashboard": "tsx --test test/dashboard*.test.ts && tsx --test test/dashboard*.browser.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",

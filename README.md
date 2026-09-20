@@ -32,13 +32,29 @@ despliega el backend**. El adaptador Node del dashboard necesita acceso a los
 registros privados locales, credenciales y una conexión WebSocket persistente
 para las llamadas. Mantén ambos procesos en la VM detrás de HTTPS/WSS.
 
-Esta integración conserva peticiones `/api/dashboard/*` y WebSocket del mismo
-origen. Antes de publicar el frontend en Vercel hay que configurar y comprobar
-el enrutamiento hacia ese adaptador, incluido el upgrade WebSocket; un hosting
-estático sin ese enrutamiento no permite iniciar sesión ni llamar. No se ha
-validado aún un despliegue Vercel. Para evaluar ahora, usa el servidor integrado
-en `4321` mediante un proxy HTTPS o un túnel SSH autorizado. Nunca publiques
-`.env.local`, `.local/`, grabaciones ni tokens como variables del frontend.
+Importa esta rama en Vercel con la raíz del repositorio y el preset **Other**.
+`vercel.json` ejecuta `npm run build:dashboard` y genera Build Output API v3.
+Configura en Vercel **solo** `DASHBOARD_BACKEND_ORIGIN`, por ejemplo
+`https://dashboard-backend.example.com` (sin barra final), apuntando al
+adaptador de `4321`, no al servidor de voz de `7860`.
+En `.local/dashboard.env` de la VM configura
+`DASHBOARD_PUBLIC_ORIGIN=https://tu-dashboard.vercel.app`, la URL exacta del
+frontend sin barra final, y reinicia únicamente el dashboard cuando no tenga
+llamadas demo activas. El proxy HTTPS del backend debe conservar Host, Origin,
+Authorization y el upgrade WebSocket.
+
+Las lecturas y el análisis NLP usan `/api/dashboard/*` mediante un rewrite HTTP
+autenticado y sin caché. El audio conecta directamente por WSS al adaptador:
+no depende de que Vercel haga proxy del upgrade. Los tickets siguen siendo de
+un solo uso y ligados al origen exacto. Los previews con otro dominio no
+autorizan llamadas ni análisis hasta configurar explícitamente ese origen.
+Azure, Prosper, registros y token permanecen en la VM; nunca los añadas a las
+variables del frontend ni al repositorio. El visitante introduce el token en
+el formulario y este permanece solo en memoria.
+
+Después del despliegue, comprueba login, Configuración, Señales y una llamada
+con micrófono solicitada explícitamente. La preparación se prueba localmente;
+no se afirma que se haya publicado o verificado una URL Vercel real.
 
 A TypeScript backend for the Prosper HackSpain challenge. It adapts Prosper's
 Twilio Media Streams protocol to Azure OpenAI Realtime in Foundry by default, following
@@ -709,6 +725,17 @@ and is never replaced with demo values. Historical statistics are explicitly a
 bounded observed sample (default seven days, up to 200 local files and 200
 receipts), not a complete population; period-over-period trends are not invented.
 The date ranges use Europe/Madrid calendar days.
+
+### Agent configuration
+
+In **Demo visual**, all four configuration tabs reproduce the original
+`platform` mockup's profile, prompt, traits, policies, actions and compliance
+examples. They are labelled fictional and read-only, never applied to Azure.
+In **Datos reales**, the prompt textbox shows the backend's actual instruction
+generator (`src/receptionist.ts`), with today's Madrid date as an example
+anchor. Each actual call has its own date and submission permission. Live,
+when explicitly selected, shows its voice and delegated backend instructions.
+This is not a Foundry readback or proof of an already-running session's prompt.
 
 ### Browser voice demo
 

@@ -2,8 +2,10 @@ import { el, mount } from "../lib/dom.js";
 import { card, pill, emptyState } from "../components/ui.js";
 import { sourcesCard } from "../components/sources.js";
 import { snapshot } from "../data/api.js";
+import { presentation } from "../data/presentation.js";
+import { demoConfiguration } from "../components/demo-config.js";
 
-export const meta = { title: "Configuración", sub: "Estado real del backend · sin cambios desde el dashboard" };
+export const meta = { title: "Configuración", sub: "Perfil e instrucciones · configuración de solo lectura" };
 const tabs = [
   { id: "agente", label: "Agente" }, { id: "instrucciones", label: "Instrucciones" },
   { id: "acciones", label: "Acciones" }, { id: "cumplimiento", label: "Cumplimiento" },
@@ -18,6 +20,10 @@ export function render() {
   let tab = "agente";
   const panel = el("div", { class: "stack stack--lg" });
   function paint() {
+    if (presentation === "demo") {
+      mount(panel, ...demoConfiguration(tab));
+      return;
+    }
     const health = snapshot.health;
     if (tab === "agente") mount(panel,
       el("div", { class: "grid grid--main" },
@@ -27,6 +33,7 @@ export function render() {
             ["Estado", health?.status],
             ["Conector", health?.voiceConnector],
             ["Deployment de voz", health?.voiceDeployment],
+            ["Voz configurada", snapshot.agentConfiguration?.voice],
             ["Backend Live", health?.voiceConnector === "live" ? health.voiceBackendDeployment : "No utilizado"],
             ["Ganancia de salida", health ? `${health.voiceOutputGainDb} dB` : null],
             ["Llamadas activas", health?.activeCalls],
@@ -36,8 +43,13 @@ export function render() {
       card({ title: "Canales" }, pill("Prosper / WebSocket entrante"),
         el("p", { class: "card__sub" }, "No hay WhatsApp, SMS, llamadas salientes ni un servicio Speech separado en el runtime.")));
     else if (tab === "instrucciones") mount(panel,
-      card({ title: "Instrucciones del agente" }, emptyState("Gestionadas en el backend",
-        "El prompt y sus salvaguardas permanecen en src/receptionist.ts. No se cambian desde esta integración.")),
+      card({ title: "Instrucciones del agente", sub: "Copia de las instrucciones enviadas a Azure desde este backend; sin conexión a Foundry y sin edición." },
+        snapshot.agentConfiguration ? [
+          el("p", { class: "card__sub" }, "Fecha de referencia: hoy en Madrid. Cada llamada usa su propia fecha. Esta vista no inspecciona sesiones ya abiertas."),
+          el("textarea", { class: "textarea", readOnly: true, "aria-label": "Prompt real de Azure",
+            style: { minHeight: "440px" }, value: snapshot.agentConfiguration.prompt }),
+          el("p", { class: "card__sub" }, `${snapshot.agentConfiguration.prompt.length} caracteres · src/receptionist.ts`),
+        ] : emptyState("Prompt no disponible", "Actualiza el adaptador del dashboard para consultar las instrucciones del backend.")),
       card({ title: "Carácter, reacciones y simulación" }, emptyState("No implementados",
         "No hay valores reales de personalidad ni previsiones de satisfacción que mostrar. Los ajustes de demostración no se aplican al agente.")));
     else if (tab === "acciones") mount(panel,

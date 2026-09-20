@@ -74,7 +74,7 @@ export function createDashboardServer(
         if (request.method === "POST" && url.pathname === "/api/dashboard/demo-call" && !url.search) {
           if (!options.demoCalls) throw new AppError("dashboard_demo_disabled");
           await requireEmptyBody(request);
-          json(response, 201, await options.demoCalls.issueTicket(dashboardRequestOrigin(request)));
+          json(response, 201, await options.demoCalls.issueTicket(dashboardRequestOrigin(request, config.DASHBOARD_PUBLIC_ORIGIN)));
           return;
         }
         const signals = /^\/api\/dashboard\/calls\/([^/]*)\/signals$/.exec(url.pathname);
@@ -85,7 +85,7 @@ export function createDashboardServer(
         }
         if (request.method === "POST" && signals) {
           if (url.search) throw new AppError("dashboard_invalid_signals_request");
-          dashboardRequestOrigin(request);
+          dashboardRequestOrigin(request, config.DASHBOARD_PUBLIC_ORIGIN);
           await requireEmptyBody(request, "dashboard_invalid_signals_request");
           let callId: string;
           try { callId = decodeURIComponent(signals[1] ?? ""); }

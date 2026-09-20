@@ -138,8 +138,10 @@ El selector de la cabecera es explícito y solo vive en memoria:
 La marca, fuentes del sistema, paleta, sidebar, hero, seis tarjetas KPI, gráficos,
 mapa y jerarquía de chat conservan los estilos originales. Los avisos y fuentes
 se compactan en la cabecera, sin ocultar los errores. El estado de conexión y
-del agente en el sidebar sigue siendo **real**, también en demo visual; la
-configuración muestra expresamente el backend real. No se solicitan avatares,
+del agente en el sidebar sigue siendo **real**, también en demo visual. En
+Configuración, Demo visual reproduce los datos ficticios del mockup y Datos
+reales muestra el perfil del backend y su prompt completo de solo lectura,
+sin consultar Foundry. No se solicitan avatares,
 fuentes, analítica o códecs a terceros. Los controles sin implementación real,
 como reproducción de grabaciones o edición del agente, continúan deshabilitados.
 

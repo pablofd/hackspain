@@ -61,8 +61,8 @@ test("the original dashboard runs end-to-end with read-only sources, empty state
   assert.match(page.url(), /#\/clientes\/PATIENT_TEST$/);
   await page.getByRole("link", { name: "Configuración", exact: true }).click();
   await page.getByRole("button", { name: "Instrucciones", exact: true }).click();
-  await page.getByText("Gestionadas en el backend", { exact: true }).waitFor();
-  assert.equal(await page.locator("textarea").count(), 0);
+  await page.getByRole("textbox", { name: "Prompt real de Azure" }).waitFor();
+  assert.match(await page.getByRole("textbox", { name: "Prompt real de Azure" }).inputValue(), /Clinica Arenal/);
   await page.getByRole("button", { name: "Cumplimiento", exact: true }).click();
   await page.getByText("Metadatos y transcripción autenticada de la llamada seleccionada; sin archivos NDJSON ni WAV", { exact: true }).waitFor();
   await page.getByRole("link", { name: "Llamadas", exact: true }).click();

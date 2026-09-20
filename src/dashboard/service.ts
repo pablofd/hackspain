@@ -8,6 +8,8 @@ import type { DashboardConfig } from "./config.js";
 import { DashboardRecords, type LocalCall } from "./records.js";
 import { cached, observe, requestJson, type Source } from "./source.js";
 import { DashboardSignals } from "./signals.js";
+import { receptionistInstructions } from "../receptionist.js";
+import { liveSessionConfiguration } from "../azure-live.js";
 
 const healthSchema = z.object({
   status: z.enum(["ok", "stopping"]),
@@ -176,6 +178,14 @@ export class DashboardService {
         azure: status(openAi), foundry: status(traces), speech: status(speech),
       },
       health: health.data, clinic: clinic.data,
+      agentConfiguration: {
+        voice: this.config.voice.VOICE_CONNECTOR === "live"
+          ? this.config.voice.AZURE_OPENAI_LIVE_VOICE : this.config.voice.AZURE_OPENAI_VOICE,
+        prompt: this.config.voice.VOICE_CONNECTOR === "live"
+          ? [liveSessionConfiguration(this.config.voice, { startedAt: now, allowSubmissions: true }).instructions,
+            liveSessionConfiguration(this.config.voice, { startedAt: now, allowSubmissions: true }).delegation.responses.instructions].join("\n\n")
+          : receptionistInstructions(now, true),
+      },
       calls: [...calls.values()].sort((a, b) =>
         Date.parse(b.startedAt ?? b.receivedAt ?? "") - Date.parse(a.startedAt ?? a.receivedAt ?? "")),
       cloud: { openAi: openAi.data, speech: speech.data },

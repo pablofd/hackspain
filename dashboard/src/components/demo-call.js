@@ -4,6 +4,7 @@ import { snapshot, createDemoCall, validTranscriptEntry } from "../data/api.js";
 import { createMuLawCodec } from "../lib/voice-codec.js";
 import { voicePlayback } from "../lib/voice-playback.js";
 import { transcriptPanel } from "./transcript.js";
+import { dashboardBackendOrigin } from "../data/deployment.js";
 
 const messages = {
   NotAllowedError: "Permiso de micrófono denegado. Autorízalo en el navegador para continuar.",
@@ -168,8 +169,8 @@ export function demoCallControl() {
       if (!active()) return;
       const codec = createMuLawCodec(ticket.decodeTable);
       session.playback = voicePlayback(session.context, codec);
-      const address = new URL(ticket.websocketPath, location.origin);
-      address.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      const address = new URL(ticket.websocketPath, dashboardBackendOrigin ?? location.origin);
+      address.protocol = address.protocol === "https:" ? "wss:" : "ws:";
       session.socket = new WebSocket(address, ["maio-demo", ticket.ticket]);
       session.socket.onopen = () => { if (active()) status.textContent = "Conectando con el agente de Azure…"; };
       session.socket.onerror = () => fail(session, new Error("dashboard_demo_connection_failed"));

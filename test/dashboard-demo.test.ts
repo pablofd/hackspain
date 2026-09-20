@@ -31,9 +31,9 @@ async function waitFor(check: () => boolean): Promise<void> {
   assert.ok(check(), "Expected demo transport event was not observed");
 }
 
-async function setup(t: TestContext, voiceFactory: VoiceFactory, now?: () => number) {
+async function setup(t: TestContext, voiceFactory: VoiceFactory, now?: () => number, overrides: NodeJS.ProcessEnv = {}) {
   const directory = dashboardDirectory(t);
-  const config = dashboardConfig(directory);
+  const config = dashboardConfig(directory, overrides);
   const upstream = dashboardFetch();
   const demo = new DashboardDemoCalls(config, { voiceFactory, ...(now ? { now } : {}) });
   const server = createDashboardServer(config, new DashboardService(config, upstream.request),
@@ -88,6 +88,30 @@ test("demo admission needs independent authentication, same origin and an empty 
   ] as const) {
     const response = await fetch(`${h.base}/api/dashboard/demo-call`, {
       method: "POST", headers, ...(body ? { body } : {}),
+    });
+
+    test("an explicitly allowed frontend can admit by HTTP proxy and connect directly to the backend socket", async (t) => {
+      const origin = "https://dashboard.example";
+      let opened = 0;
+      const h = await setup(t, async (call) => {
+        assert.equal(call.allowSubmissions, false);
+        opened += 1;
+        return { sendAudio() {}, sendText() {}, async close() {} };
+      }, undefined, { DASHBOARD_PUBLIC_ORIGIN: origin });
+      const response = await fetch(`${h.base}/api/dashboard/demo-call`, {
+        method: "POST", headers: { ...h.headers, Origin: origin, "Sec-Fetch-Site": "same-origin" },
+      });
+      assert.equal(response.status, 201);
+      const ticket = ticketSchema.parse(await response.json());
+      await rejectedSocket(h.base, ticket.ticket, "https://other.example", 403);
+      await rejectedSocket(h.base, ticket.ticket, h.base, 401);
+      const { client, packets } = await connect(h.base, ticket, origin);
+      await waitFor(() => packets.some((packet) => packet.event === "ready"));
+      assert.equal(opened, 1);
+      await rejectedSocket(h.base, ticket.ticket, origin, 401);
+      const closed = once(client, "close");
+      client.send(JSON.stringify({ event: "stop" }));
+      await closed;
     });
     assert.equal(response.status, expected);
   }

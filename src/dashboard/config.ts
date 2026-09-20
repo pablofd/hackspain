@@ -8,6 +8,10 @@ const resourceId = z.string().regex(
   /^\/subscriptions\/[0-9a-f-]{36}\/resourceGroups\/[A-Za-z0-9_.()-]+\/providers\/Microsoft\.CognitiveServices\/accounts\/[A-Za-z0-9_-]+$/i,
 );
 const settings = z.object({
+  DASHBOARD_PUBLIC_ORIGIN: optional(z.string().url().refine((value) => {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.origin === value;
+  })),
   DASHBOARD_HOST: z.enum(["127.0.0.1", "::1"]).default("127.0.0.1"),
   DASHBOARD_PORT: z.coerce.number().int().min(0).max(65535).default(4321),
   DASHBOARD_TOKEN: z.string().min(32).max(256).regex(/^\S+$/),

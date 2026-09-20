@@ -95,6 +95,12 @@ code. Use synthetic fixtures and normal API lookups instead.
   Ordered `clear` is opt-in for browser playback; keep production defaults.
   Distinguish real observations, explicitly illustrative UI data and paid
   Azure voice. Do not hide a live source error behind unlabelled sample data.
+- Dashboard configuration examples belong only to Demo visual. Real prompt
+  display uses the runtime instruction generator, not a Foundry readback.
+  Vercel serves public assets and proxies authenticated HTTP; audio connects
+  directly to the persistent adapter over WSS. An optional exact HTTPS
+  `DASHBOARD_PUBLIC_ORIGIN` authorizes that frontend without wildcard origins,
+  forwarded-header trust, reusable tickets or browser access to backend secrets.
 - Update **Error history and lessons learned** below for each investigated
   failure. Record evidence, cause, correction, regression and remaining limits.
   Distinguish a local fix, an accepted API receipt and a passing judge verdict.

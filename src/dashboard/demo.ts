@@ -38,13 +38,13 @@ export function dashboardRequestHost(request: IncomingMessage): string {
   } catch { throw new AppError("dashboard_invalid_request_host"); }
 }
 
-export function dashboardRequestOrigin(request: IncomingMessage): string {
+export function dashboardRequestOrigin(request: IncomingMessage, publicOrigin?: string): string {
   try {
     const value = request.headers.origin;
     if (!value) throw new Error();
     const origin = new URL(value);
     if (!["http:", "https:"].includes(origin.protocol) || origin.origin !== value ||
-        origin.host !== dashboardRequestHost(request)) throw new Error();
+        (origin.host !== dashboardRequestHost(request) && origin.origin !== publicOrigin)) throw new Error();
     return origin.origin;
   } catch { throw new AppError("dashboard_demo_origin_denied"); }
 }
@@ -168,7 +168,7 @@ export class DashboardDemoCalls {
     );
     if (this.closed) { reject("503 Service Unavailable"); return; }
     let origin: string;
-    try { origin = dashboardRequestOrigin(request); }
+    try { origin = dashboardRequestOrigin(request, this.config.DASHBOARD_PUBLIC_ORIGIN); }
     catch { reject("403 Forbidden"); return; }
     this.expireTicket();
     const protocols = request.headers["sec-websocket-protocol"]?.split(",").map((value) => value.trim());
