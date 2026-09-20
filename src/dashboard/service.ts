@@ -39,6 +39,9 @@ function publicAction(action: ProsperAction) {
     providerId: "provider_id" in action ? action.provider_id : null,
     locationId: "location_id" in action ? action.location_id : null,
     slot: "slot" in action ? action.slot : null,
+    policyId: "policy_id" in action ? action.policy_id : null,
+    appointmentTypeId: "appointment_type_id" in action ? action.appointment_type_id : null,
+    appointmentId: "appointment_id" in action ? action.appointment_id : null,
   };
 }
 
@@ -130,6 +133,7 @@ export class DashboardService {
         endReason: local.endReason,
         actions: accepted.map(({ action, reason }) => ({
           action, reason, patientId: null, providerId: null, locationId: null, slot: null,
+          policyId: null, appointmentTypeId: null, appointmentId: null,
         })),
         receiptSource: accepted.length ? "local" : null, patientIds: [], events: local.events,
         technical: {

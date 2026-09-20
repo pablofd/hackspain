@@ -3,7 +3,6 @@ import { icon } from "./lib/icons.js";
 import { connect, disconnect, refresh, snapshot } from "./data/api.js";
 import { presentation, setPresentation } from "./data/presentation.js";
 import { compactSources } from "./components/sources.js";
-import { demoCallControl } from "./components/demo-call.js";
 import * as home from "./views/home.js";
 import * as calls from "./views/calls.js";
 import * as config from "./views/config.js";
@@ -25,7 +24,7 @@ let status;
 let banner;
 let clinicName;
 let sourceStatus;
-let demoControl;
+let connectionError = null;
 let searchInput;
 let modeBar;
 const navLinks = new Map();
@@ -38,7 +37,6 @@ function route() {
 
 function renderRoute() {
   if (!snapshot || !content) return;
-  demoControl?.close();
   sourceStatus?.close();
   view?.dispose?.();
   const { path, param, query } = route();
@@ -54,25 +52,27 @@ function renderRoute() {
   document.documentElement.style.setProperty("--scroll-gutter", `${content.offsetWidth - content.clientWidth}px`);
 }
 
-function paintStatus(error) {
+function paintStatus(error = connectionError) {
   if (!banner) return;
+  connectionError = error;
+  const provenance = presentation === "demo" ? "Demo visual · datos simulados" : "";
   banner.textContent = error
-    ? `Sin actualizar: ${error}. Los datos anteriores no representan el estado en directo.`
-    : `${presentation === "demo" ? "Demo visual · pacientes, conversaciones y métricas simulados" : "Datos reales · muestra observada, no veredictos del juez"} · ${new Date(snapshot.observedAt).toLocaleTimeString("es-ES")}`;
+    ? `${provenance ? `${provenance} · ` : ""}Sin actualizar: ${error}. Los datos anteriores no representan el estado en directo.`
+    : provenance;
+  banner.hidden = !error && presentation === "real";
   banner.classList.toggle("text-alert", Boolean(error));
   status.textContent = error ? "Estado no actualizado" : snapshot.health
     ? `Agente real · ${snapshot.health.activeCalls} llamadas activas`
     : "Estado del agente no disponible";
   clinicName.textContent = snapshot.clinic?.name ?? "Clínica no disponible";
   sourceStatus?.update();
-  demoControl?.refresh();
 }
 
 async function poll(currentGeneration) {
   try {
     await refresh();
     if (currentGeneration !== generation) return;
-    paintStatus();
+    paintStatus(null);
     view?.update?.();
   } catch (error) {
     if (currentGeneration !== generation) return;
@@ -83,13 +83,13 @@ async function poll(currentGeneration) {
 }
 
 function shell() {
+  connectionError = null;
   title = el("h1", { class: "topbar__title" });
   sub = el("p", { class: "topbar__sub" });
   status = el("p", {});
   clinicName = el("h4", {});
   banner = el("div", { class: "connection-banner", role: "status" });
   sourceStatus = compactSources();
-  demoControl = demoCallControl();
   modeBar = el("div", { class: "segmented presentation-switch", role: "group", "aria-label": "Origen de los datos" },
     ...[["real", "Datos reales"], ["demo", "Demo visual"]].map(([value, label]) =>
       el("button", { class: presentation === value ? "is-active" : "", "aria-pressed": presentation === value, onclick: () => {
@@ -137,7 +137,7 @@ function shell() {
           el("button", { class: "btn btn--icon btn--ghost nav-toggle", "aria-label": "Abrir menú",
             onclick: () => document.body.classList.toggle("nav-open") }, icon("menu", "nav__icon")),
           el("div", { class: "topbar__titles" }, title, sub),
-          el("div", { class: "topbar__actions" }, search, modeBar, demoControl.element)),
+          el("div", { class: "topbar__actions" }, search, modeBar)),
         el("div", { class: "connection-strip" }, banner, sourceStatus.element), content),
       el("div", { class: "scrim", onclick: () => document.body.classList.remove("nav-open") })));
   paintStatus();
@@ -148,8 +148,6 @@ function shell() {
 function login() {
   generation += 1;
   clearTimeout(timer);
-  demoControl?.dispose();
-  demoControl = null;
   sourceStatus = null;
   view?.dispose?.();
   view = null;
@@ -180,7 +178,6 @@ function login() {
 }
 
 window.addEventListener("hashchange", renderRoute);
-window.addEventListener("pagehide", () => demoControl?.close());
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape") document.body.classList.remove("nav-open");
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && content) {

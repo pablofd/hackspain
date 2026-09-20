@@ -27,42 +27,44 @@ export function demoCallControl() {
   let disposed = false;
   let entries = [];
   let limited = false;
-  const transcript = transcriptPanel("Transcripción de la llamada fake");
+  const transcript = transcriptPanel("Transcripción de la llamada en directo");
   const status = el("p", { class: "demo-call__status", role: "status" }, "Lista para una prueba de voz.");
   const timer = el("span", { class: "mono" }, "00:00 / 03:00");
   const tools = el("p", { class: "card__sub demo-call__tools" });
   const start = el("button", { class: "btn btn--primary", onclick: () => void begin() }, icon("phone", "nav__icon"), "Iniciar llamada");
   const hangup = el("button", { class: "btn btn--danger", disabled: true, onclick: () => finish("Llamada finalizada.", false) }, "Colgar");
-  const dialog = el("dialog", { class: "demo-call-dialog grain", "aria-label": "Llamada fake" },
+  const dialog = el("dialog", { class: "demo-call-dialog grain", "aria-label": "Llamada en directo" },
     el("header", { class: "demo-call__head" },
       icon("maio", "chat-card__logo"), el("div", {},
-        el("h2", { class: "card__title" }, "Llamada fake"),
+        el("h2", { class: "card__title" }, "Llamada en directo"),
         el("p", { class: "card__sub" }, "Voz real con Azure · prueba no puntuable")),
-      el("button", { class: "btn btn--icon btn--ghost ml-auto", "aria-label": "Cerrar llamada fake", onclick: close }, "✕")),
+      el("button", { class: "btn btn--icon btn--ghost ml-auto", "aria-label": "Cerrar llamada en directo", onclick: close }, "✕")),
     el("p", { class: "demo-call__notice" },
       "Usa el micrófono para hablar con el agente. Consume Azure de pago. Máximo 3 minutos; no se envían acciones a Prosper ni se modifica el EHR. Evita datos personales reales."),
     el("div", { class: "demo-call__controls row row--wrap" }, start, hangup, timer),
     status, tools, transcript.element);
-  const button = el("button", { class: "btn btn--primary btn--sm", hidden: true, onclick: () => {
+  const button = el("button", { class: "btn btn--primary", hidden: true, onclick: () => {
     if (disposed || !snapshot?.demoCall?.enabled || current) return;
     if (typeof dialog.showModal !== "function") {
       hint.textContent = messages.dashboard_demo_unsupported;
+      hint.hidden = false;
       hint.classList.add("text-alert");
       return;
     }
     dialog.showModal();
     refresh();
-  } }, icon("microphone", "nav__icon"), "Llamada fake");
-  const hint = el("span", { class: "demo-call__hint", hidden: true }, "Azure de pago · sin envíos");
+  } }, icon("microphone", "nav__icon"), "Llamada en directo");
+  const hint = el("span", { class: "demo-call__hint", hidden: true, role: "status" });
   const element = el("div", { class: "demo-call-control" }, button, hint, dialog);
   dialog.addEventListener("cancel", (event) => { event.preventDefault(); close(); });
 
   function refresh() {
     const enabled = snapshot?.demoCall?.enabled === true;
     const busy = enabled && snapshot.demoCall.activeCalls >= snapshot.demoCall.maxConcurrentCalls;
-    button.hidden = hint.hidden = !enabled;
+    button.hidden = !enabled;
+    if (!enabled) hint.hidden = true;
     button.disabled = Boolean(current) || busy;
-    button.title = busy ? "Ya hay una llamada de prueba activa" : "Abrir una prueba de voz con micrófono";
+    button.title = busy ? "Ya hay una llamada de prueba activa" : "Voz con Azure de pago · sin envíos clínicos";
     start.disabled = !enabled || Boolean(current) || busy;
     hangup.disabled = !current;
     if (current && !enabled) finish(messages.dashboard_demo_disabled, true);

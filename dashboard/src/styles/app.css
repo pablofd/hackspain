@@ -1844,6 +1844,16 @@ table.data .cell-sub {
   cursor: pointer;
 }
 
+.map__node-fallback {
+  color: var(--blue-slate);
+  fill: currentColor;
+  pointer-events: none;
+}
+
+.map__hub {
+  filter: drop-shadow(0 5px 12px rgba(var(--ink-rgb), 0.18));
+}
+
 /* Las etiquetas invaden el círculo del vecino: sólo el retrato admite el clic */
 .map__node text {
   pointer-events: none;
@@ -1886,12 +1896,24 @@ table.data .cell-sub {
 }
 
 .map-person__photo {
+  display: grid;
+  place-items: center;
   width: 42px;
   height: 42px;
   flex: none;
   object-fit: cover;
   border-radius: 50%;
   border: 1px solid var(--stroke-soft);
+}
+
+.map-person__photo--fallback {
+  background: var(--parchment);
+  color: var(--blue-slate);
+}
+
+.map-person__photo-icon {
+  width: 27px;
+  height: 27px;
 }
 
 .map-person__name {
@@ -2771,7 +2793,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .presentation-switch { flex: none; }
 .presentation-switch button { padding: 6px 9px; font-size: 11px; white-space: nowrap; }
 .topbar-search { width: 185px; }
-.source-status { position: relative; flex: none; z-index: 5; font-size: 11px; color: var(--text-secondary); }
+.source-status { position: relative; flex: none; margin-left: auto; z-index: 5; font-size: 11px; color: var(--text-secondary); }
 .source-status > summary { cursor: pointer; }
 .source-popover { position: absolute; right: 0; top: calc(100% + 10px); width: min(460px, 90vw); max-height: 70vh; overflow-y: auto; box-shadow: var(--shadow-lg); background: var(--white); }
 .source-popover .card { margin: 0; }
@@ -2801,6 +2823,15 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .demo-call__status, .demo-call__tools { padding: 0 24px 10px; font-size: 12px; }
 .demo-call-dialog .chat { height: clamp(180px, 35vh, 370px); }
 .btn--danger { background: var(--lipstick-red); border-color: var(--lipstick-red); color: var(--white); }
+
+.real-signals .card__sub, .real-signals [role="status"] { margin-bottom: 10px; overflow-wrap: anywhere; }
+.textual-indicator, .signals-finding { padding: 12px 0; border-top: 1px solid var(--stroke-soft); }
+.signals-references { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 8px; font-size: 11px; color: var(--text-muted); }
+.signals-references .btn { font-size: 11px; padding: 3px 6px; }
+.signals-evidence summary { cursor: pointer; font-size: 12px; }
+.signals-quote { margin: 14px 0 0; padding: 10px 12px; border-left: 2px solid var(--dusty-denim); background: var(--glass-warm); }
+.signals-quote figcaption { margin-bottom: 6px; font-size: 10px; color: var(--text-muted); }
+.signals-quote blockquote { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.55; }
 
 @media (max-width: 1400px) {
   .topbar-search { display: none; }

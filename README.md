@@ -647,6 +647,29 @@ voice demo are separate concepts. An example chart is not measured call quality,
 a demo conversation is not a judge verdict, and no illustrative UI action
 modifies the real agent or clinic.
 
+### Person map
+
+The map groups calls only through patient IDs already present in received
+records, never by a similar name or telephone. Unlinked calls remain in the
+call list rather than becoming invented people. It shows at most twelve
+people per page, labelled by their resolved name or an explicit patient alias.
+Stable radial slots surround the central maio logo at deliberately varied
+distances, so the people remain dispersed rather than forming a crowded ring.
+Paging discloses the total; the same state/date filters remain.
+
+Hover, keyboard focus or click opens the person card. It includes available
+profile information, actual call IDs/times/durations/results, and a targeted
+read of that patient's upcoming EHR appointments. The last reported BOOK is
+labelled separately from the read-only EHR agenda. A name not already resolved
+through an explicit patient lookup is shown as an alias, not guessed from a
+transcript; unavailable real profile fields remain explicit.
+
+Demo portraits are locally served, CC0-labelled Pravatar placeholders documented
+under `dashboard/design/portraits/LICENSE.txt`. They are illustrative, **not
+photos of the represented patients**. Real profiles without an actual photo use
+Phosphor's Finn the Human icon instead. No names, IDs or phone numbers are sent
+to an avatar service. Demo-visual profiles and appointments remain simulated.
+
 ### Selected-call transcripts
 
 At the user's explicit request for these synthetic challenge conversations,

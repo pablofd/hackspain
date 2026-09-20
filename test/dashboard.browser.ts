@@ -412,7 +412,7 @@ test("visual demo restores chart and chat hierarchy without replacing real state
   await page.locator('input[name="dashboard-token"]').fill(settings.DASHBOARD_TOKEN);
   await page.getByRole("button", { name: "Conectar", exact: true }).click();
   await page.getByRole("heading", { name: "Clinica Sintetica", exact: true, level: 2 }).waitFor();
-  assert.equal(await page.getByRole("button", { name: "Llamada fake", exact: true }).isVisible(), false);
+  assert.equal(await page.getByRole("button", { name: "Llamada en directo", exact: true }).isVisible(), false);
   await page.getByRole("button", { name: "Demo visual", exact: true }).click();
   await page.getByRole("heading", { name: "Bienvenido a maio", exact: true }).waitFor();
   assert.match(await page.locator(".connection-banner").innerText(), /simulados/);
@@ -524,4 +524,50 @@ test("platform reference and product share brand, typography and primary layout 
   assert.ok(await current.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     "Presentation controls and call layout do not overflow a narrow viewport");
   assert.ok(requests.every((url) => url.startsWith(base)), "No external avatars, fonts or analytics");
+});
+
+test("real mode has no success banner while snapshot errors and compact demo provenance remain visible", { timeout: 25_000 }, async (t) => {
+  const directory = dashboardDirectory(t);
+  const settings = dashboardConfig(directory);
+  const server = createDashboardServer(settings, new DashboardService(settings, dashboardFetch().request), resolve("dashboard"));
+  const port = await server.listen();
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); await server.close(); });
+  const page = await browser.newPage();
+  await page.clock.install();
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  let fail = false;
+  await page.route("**/api/dashboard/snapshot", (route) => fail
+    ? route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"synthetic_snapshot_unavailable"}' })
+    : route.continue());
+  await page.goto(`http://127.0.0.1:${port}`);
+  await page.locator('input[name="dashboard-token"]').fill(settings.DASHBOARD_TOKEN);
+  await page.getByRole("button", { name: "Conectar", exact: true }).click();
+  await page.getByRole("heading", { name: "Clinica Sintetica", level: 2, exact: true }).waitFor();
+  const banner = page.locator(".connection-banner");
+  assert.equal(await banner.isVisible(), false);
+  assert.equal(await banner.textContent(), "");
+  assert.doesNotMatch(await page.locator("body").innerText(), /Datos reales · muestra observada/);
+  fail = true;
+  const failed = page.waitForResponse((response) => response.url().endsWith("/api/dashboard/snapshot") && response.status() === 503);
+  await page.clock.fastForward(5000);
+  await failed;
+  await banner.getByText(/Sin actualizar: synthetic_snapshot_unavailable/).waitFor();
+  assert.match(await banner.innerText(), /datos anteriores no representan el estado en directo/);
+  await page.getByRole("button", { name: "Demo visual", exact: true }).click();
+  assert.match(await banner.innerText(), /Demo visual · datos simulados · Sin actualizar/);
+  await page.getByRole("button", { name: "Datos reales", exact: true }).click();
+  assert.match(await banner.innerText(), /^Sin actualizar:/, "Changing presentation does not clear a stale-connection warning");
+  fail = false;
+  const recovered = page.waitForResponse((response) => response.url().endsWith("/api/dashboard/snapshot") && response.status() === 200);
+  await page.clock.fastForward(5000);
+  await recovered;
+  await page.waitForFunction(() => document.querySelector(".connection-banner")?.hasAttribute("hidden"));
+  assert.equal(await banner.textContent(), "");
+  await page.getByRole("button", { name: "Demo visual", exact: true }).click();
+  assert.equal(await banner.innerText(), "Demo visual · datos simulados");
+  await page.getByRole("button", { name: "Datos reales", exact: true }).click();
+  assert.equal(await banner.isVisible(), false);
+  assert.deepEqual(errors, []);
 });

@@ -1,0 +1,21 @@
+Illustrative avatar photographs, not photographs of clinic patients.
+
+Source: Pravatar, https://pravatar.cc/
+The publisher labels these assets "CC0 Avatar Placeholder" and "CC0 Avatar placeholders".
+Retrieved 2026-09-19 using fixed public image IDs, without patient data:
+https://i.pravatar.cc/160?img=1
+https://i.pravatar.cc/160?img=5
+https://i.pravatar.cc/160?img=12
+https://i.pravatar.cc/160?img=15
+https://i.pravatar.cc/160?img=24
+https://i.pravatar.cc/160?img=32
+https://i.pravatar.cc/160?img=33
+https://i.pravatar.cc/160?img=43
+https://i.pravatar.cc/160?img=47
+https://i.pravatar.cc/160?img=49
+https://i.pravatar.cc/160?img=51
+https://i.pravatar.cc/160?img=59
+
+Files are served locally. Never construct an avatar-service request from a
+patient name, phone, identifier or call record, and never claim a placeholder
+is the person's actual likeness or health information.

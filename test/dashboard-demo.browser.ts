@@ -142,6 +142,10 @@ async function setup(t: TestContext, options: {
   await page.locator('input[name="dashboard-token"]').fill(settings.DASHBOARD_TOKEN);
   await page.getByRole("button", { name: "Conectar", exact: true }).click();
   await page.getByRole("heading", { name: "Clinica Sintetica", level: 2, exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "Llamada en directo", exact: true }).count(), 0,
+    "The microphone launcher is not global");
+  await page.getByRole("link", { name: "Llamadas", exact: true }).click();
+  await page.getByRole("group", { name: "Mapa y llamada en directo", exact: true }).waitFor();
   assert.deepEqual(errors, [], "Audio probes and application initialize without browser errors");
   await page.evaluate(() => {
     const probe = (window as ProbeWindow).audioProbe;
@@ -163,7 +167,7 @@ async function setup(t: TestContext, options: {
     page, base, errors, requests, sent, upstream, directory, demo, tickets: () => tickets, releaseTicket,
     socket: () => { assert.ok(socket, "A local mock WebSocket was created"); return socket; },
     async start() {
-      await page.getByRole("button", { name: "Llamada fake", exact: true }).click();
+      await page.getByRole("button", { name: "Llamada en directo", exact: true }).click();
       await page.getByRole("button", { name: "Iniciar llamada", exact: true }).click();
     },
     async connected() {
@@ -229,7 +233,7 @@ test("the actual authenticated 201 ticket and native WebSocket bridge accept ear
   assert.equal(response.status(), 201);
   assert.equal(response.headers()["cache-control"], "no-store");
   assert.match(response.headers()["permissions-policy"] ?? "", /microphone=\(self\)/);
-  const transcript = app.page.getByRole("region", { name: "Transcripción de la llamada fake", exact: true });
+  const transcript = app.page.getByRole("region", { name: "Transcripción de la llamada en directo", exact: true });
   await app.page.waitForFunction(() => {
     const text = document.querySelector(".demo-call__status")?.textContent ?? "";
     return text.includes("En conversación") || text.includes("se ha detenido");
@@ -268,7 +272,7 @@ test("fake-call capture uses real AudioWorklet 160-byte frames only after ready,
   const { page } = app;
   assert.equal(app.tickets(), 0);
   assert.equal(await page.evaluate(() => (window as ProbeWindow).audioProbe.constraints.length), 0);
-  await page.getByRole("button", { name: "Llamada fake", exact: true }).click();
+  await page.getByRole("button", { name: "Llamada en directo", exact: true }).click();
   await page.getByText(/Consume Azure de pago/).waitFor();
   assert.equal(app.tickets(), 0, "Opening the dialog does not open a paid session or microphone");
   await page.getByRole("button", { name: "Iniciar llamada", exact: true }).click();
@@ -302,7 +306,7 @@ test("fake-call capture uses real AudioWorklet 160-byte frames only after ready,
   const entry = { speaker: "assistant", itemId: "demo-item", timestamp: new Date().toISOString(),
     text: "<b>Texto sintético, no HTML</b>", partial: true };
   app.socket().send(JSON.stringify({ event: "transcript", entry }));
-  const transcript = page.getByRole("region", { name: "Transcripción de la llamada fake", exact: true });
+  const transcript = page.getByRole("region", { name: "Transcripción de la llamada en directo", exact: true });
   await transcript.getByText(entry.text, { exact: true }).waitFor();
   assert.equal(await transcript.locator("b").count(), 0);
   app.socket().send(JSON.stringify({ event: "transcript", entry: { ...entry, text: "Fragmento actualizado.", partial: false } }));
@@ -398,10 +402,10 @@ test("codec, streaming resampler and playback budgets are validated with the bac
 
 test("permission denial, disabled capability and busy or unauthorized admissions never open a voice socket", { timeout: 45_000 }, async (t) => {
   const disabled = await setup(t, { enabled: false });
-  assert.equal(await disabled.page.getByRole("button", { name: "Llamada fake", exact: true }).isVisible(), false);
+  assert.equal(await disabled.page.getByRole("button", { name: "Llamada en directo", exact: true }).isVisible(), false);
   assert.equal(disabled.tickets(), 0);
   const busy = await setup(t, { busy: true });
-  assert.equal(await busy.page.getByRole("button", { name: "Llamada fake", exact: true }).isDisabled(), true);
+  assert.equal(await busy.page.getByRole("button", { name: "Llamada en directo", exact: true }).isDisabled(), true);
   assert.equal(busy.tickets(), 0);
   const denied = await setup(t);
   await denied.page.evaluate(() => { (window as ProbeWindow).audioProbe.denied = true; });
@@ -428,7 +432,7 @@ test("late microphone permission and late tickets cannot create a socket after l
   await delayed.page.evaluate(() => { (window as ProbeWindow).audioProbe.holdMicrophone = true; });
   await delayed.start();
   await delayed.page.waitForFunction(() => (window as ProbeWindow).audioProbe.releaseMicrophone !== null);
-  await delayed.page.getByRole("button", { name: "Cerrar llamada fake", exact: true }).click();
+  await delayed.page.getByRole("button", { name: "Cerrar llamada en directo", exact: true }).click();
   await delayed.page.getByRole("button", { name: "Desconectar", exact: true }).click();
   await delayed.page.evaluate(() => (window as ProbeWindow).audioProbe.releaseMicrophone?.());
   await delayed.released();
@@ -437,7 +441,7 @@ test("late microphone permission and late tickets cannot create a socket after l
   const ticketPending = await setup(t, { holdTicket: true });
   await ticketPending.start();
   await ticketPending.page.getByText("Preparando la conexión de voz…", { exact: true }).waitFor();
-  await ticketPending.page.getByRole("button", { name: "Cerrar llamada fake", exact: true }).click();
+  await ticketPending.page.getByRole("button", { name: "Cerrar llamada en directo", exact: true }).click();
   await ticketPending.page.getByRole("button", { name: "Desconectar", exact: true }).click();
   ticketPending.releaseTicket();
   await ticketPending.released();
@@ -490,7 +494,7 @@ test("an expired dashboard session closes an active microphone call and cannot r
   await app.page.clock.fastForward(5000);
   await app.page.getByRole("button", { name: "Conectar", exact: true }).waitFor();
   await app.released();
-  assert.equal(await app.page.getByRole("dialog", { name: "Llamada fake", exact: true }).count(), 0);
+  assert.equal(await app.page.getByRole("dialog", { name: "Llamada en directo", exact: true }).count(), 0);
   assert.equal(app.tickets(), 1);
   assert.deepEqual(app.errors, []);
 });
@@ -518,4 +522,43 @@ test("unsupported audio, server errors and broken sockets are explicit failures 
   assert.deepEqual(unsupported.errors, []);
   assert.deepEqual(failed.errors, []);
   assert.deepEqual(disconnected.errors, []);
+});
+
+test("Llamada en directo sits beside Ver mapa at matching height and owns only one calls-view controller", { timeout: 25_000 }, async (t) => {
+  const app = await setup(t);
+  const { page } = app;
+  const group = page.getByRole("group", { name: "Mapa y llamada en directo", exact: true });
+  const launcher = group.getByRole("button", { name: "Llamada en directo", exact: true });
+  const map = group.getByRole("button", { name: "Ver mapa", exact: true });
+  assert.equal(await page.locator(".topbar .demo-call-control").count(), 0);
+  assert.equal(await page.locator(".demo-call-control").count(), 1);
+  for (const viewport of [{ width: 1500, height: 1100 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await launcher.scrollIntoViewIfNeeded();
+    const mapBox = await map.boundingBox();
+    const liveBox = await launcher.boundingBox();
+    assert.ok(mapBox && liveBox);
+    assert.ok(Math.abs(mapBox.height - liveBox.height) <= 1, "The two toolbar buttons have the same height");
+    assert.ok(Math.abs(mapBox.y - liveBox.y) <= 1, "The launcher shares the map button's baseline");
+    assert.ok(liveBox.x >= mapBox.x + mapBox.width && liveBox.x - mapBox.x - mapBox.width <= 20,
+      "The launcher is immediately to the right of Ver mapa, including narrow layouts");
+  }
+  await page.setViewportSize({ width: 1500, height: 1100 });
+  await launcher.click();
+  await page.getByRole("dialog", { name: "Llamada en directo", exact: true }).waitFor();
+  await page.getByRole("heading", { name: "Llamada en directo", exact: true }).waitFor();
+  assert.match(await page.locator(".demo-call__notice").innerText(), /Azure de pago.*no se envían acciones a Prosper ni se modifica el EHR/);
+  assert.equal(app.tickets(), 0);
+  assert.equal(await page.evaluate(() => (window as ProbeWindow).audioProbe.constraints.length), 0,
+    "Opening the renamed dialog does not request a microphone or create a paid session");
+  await page.getByRole("button", { name: "Cerrar llamada en directo", exact: true }).click();
+  await page.getByRole("link", { name: "Inicio", exact: true }).click();
+  await page.getByRole("heading", { name: "Clinica Sintetica", level: 2, exact: true }).waitFor();
+  assert.equal(await page.locator(".demo-call-control").count(), 0);
+  await page.getByRole("link", { name: "Llamadas", exact: true }).click();
+  await group.waitFor();
+  assert.equal(await page.locator(".demo-call-control").count(), 1);
+  assert.equal(await page.getByRole("button", { name: "Llamada fake", exact: true }).count(), 0);
+  assert.equal(app.tickets(), 0);
+  assert.deepEqual(app.errors, []);
 });

@@ -1,5 +1,7 @@
 import { svg } from "./dom.js";
 
+export const FINN_THE_HUMAN_PATH = "M168,104H88a40,40,0,0,0-40,40v8a40,40,0,0,0,40,40h80a40,40,0,0,0,40-40v-8A40,40,0,0,0,168,104Zm24,48a24,24,0,0,1-24,24H88a24,24,0,0,1-24-24v-8a24,24,0,0,1,24-24h80a24,24,0,0,1,24,24ZM208,40a32.06,32.06,0,0,0-31,24H79a32,32,0,0,0-63,8v80a72.08,72.08,0,0,0,72,72h80a72.08,72.08,0,0,0,72-72V72A32,32,0,0,0,208,40Zm16,112a56.06,56.06,0,0,1-56,56H88a56.06,56.06,0,0,1-56-56V72a16,16,0,0,1,32,0,8,8,0,0,0,8,8H184a8,8,0,0,0,8-8,16,16,0,0,1,32,0Zm-120-4a12,12,0,1,1-12-12A12,12,0,0,1,104,148Zm72,0a12,12,0,1,1-12-12A12,12,0,0,1,176,148Z";
+
 /* Trazos ligeros tipo SF Symbols · viewBox 24x24 */
 const PATHS = {
   maio: [
@@ -74,17 +76,19 @@ const PATHS = {
     "M4 20.4h16",
     "M8.4 7.6h3.2M8.4 11.2h3.2M8.4 14.8h3.2",
   ],
+  finn: [FINN_THE_HUMAN_PATH],
 };
 
 export function icon(name, cls = "nav__icon") {
   const paths = PATHS[name] || PATHS.sparkle;
+  const filled = name === "finn";
   return svg(
     "svg",
     {
       class: cls,
-      viewBox: "0 0 24 24",
-      fill: "none",
-      stroke: "currentColor",
+      viewBox: filled ? "0 0 256 256" : "0 0 24 24",
+      fill: filled ? "currentColor" : "none",
+      stroke: filled ? "none" : "currentColor",
       "stroke-width": name === "maio" ? "1.8" : "1.5",
       "stroke-linecap": "round",
       "stroke-linejoin": "round",

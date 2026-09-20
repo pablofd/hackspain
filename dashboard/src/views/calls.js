@@ -3,6 +3,8 @@ import { icon } from "../lib/icons.js";
 import { card, pill, emptyState, bar, donut } from "../components/ui.js";
 import { networkPanel } from "../components/network.js";
 import { transcriptPanel } from "../components/transcript.js";
+import { realSignalsPanel } from "../components/signals.js";
+import { demoCallControl } from "../components/demo-call.js";
 import { snapshot as liveSnapshot, outcomeLabels, formatDate, callTranscript } from "../data/api.js";
 import { getPresentation, demoSentiments } from "../data/presentation.js";
 import { RANGES, STATES, DEFAULT_RANGE, inRange, matchesState, callQuality } from "../data/insights.js";
@@ -18,12 +20,15 @@ export function render(param, query) {
   let selectedId = query?.get("llamada");
   let mapOpen = param === "mapa";
   let panel = null;
-  let mapSignature;
+  let mapView;
   let disposed = false;
   let transcriptId;
   let transcriptController;
   let transcript = { status: "idle", data: null };
   const transcriptView = transcriptPanel();
+  const realSignals = realSignalsPanel();
+  const demoCall = demoCallControl();
+  const stopDemo = () => demoCall.close();
   const tbody = el("tbody", {});
   const detail = chatCard(togglePanel, transcriptView.element);
   const summary = el("div", { class: "grid grid--2" });
@@ -43,6 +48,7 @@ export function render(param, query) {
   function togglePanel(kind) {
     panel = panel === kind ? null : kind;
     paint();
+    if (panel === "signals" && !getPresentation().simulated && !mapOpen) realSignals.open();
   }
 
   function paintTranscript() {
@@ -85,9 +91,12 @@ export function render(param, query) {
 
   function paint() {
     if (disposed) return;
+    demoCall.refresh();
     const rows = visible();
     if (!rows.some((call) => call.id === selectedId)) selectedId = rows[0]?.id;
     const selected = rows.find((call) => call.id === selectedId);
+    const realSignalsVisible = Boolean(selected && panel === "signals" && !mapOpen && !getPresentation().simulated);
+    realSignals.update(selected?.id, liveSnapshot?.signalAnalysis, realSignalsVisible);
     const nextTranscriptId = mapOpen ? undefined : selected?.id;
     if (nextTranscriptId !== transcriptId) void loadTranscript(nextTranscriptId);
     mount(tbody, ...rows.map((call) => el("tr", {
@@ -122,13 +131,13 @@ export function render(param, query) {
     grid.classList.toggle("is-signals", Boolean(panel && selected));
     listCard.hidden = Boolean(panel && selected);
     signals.hidden = !panel || !selected;
-    mount(signals, ...(panel && selected ? (panel === "metrics" ? metricsPanel(selected) : signalsPanel(selected)) : []));
+    if (realSignalsVisible) {
+      if (signals.firstChild !== realSignals.element) mount(signals, realSignals.element);
+    } else mount(signals, ...(panel && selected ? (panel === "metrics" ? metricsPanel(selected) : signalsPanel(selected)) : []));
     if (mapOpen) {
-      const signature = JSON.stringify(rows);
-      if (signature !== mapSignature) {
-        mount(board, networkPanel(rows, { state: filter, range }));
-        mapSignature = signature;
-      }
+      if (!mapView) mapView = networkPanel(rows, { state: filter, range });
+      else mapView.update(rows, { state: filter, range });
+      if (board.firstChild !== mapView) mount(board, mapView);
     } else if (board.firstChild !== grid) mount(board, grid);
   }
 
@@ -144,7 +153,6 @@ export function render(param, query) {
   }
   const mapButton = el("button", { class: mapOpen ? "btn btn--primary" : "btn", onclick: () => {
     mapOpen = !mapOpen;
-    mapSignature = null;
     mapButton.classList.toggle("btn--primary", mapOpen);
     mapButton.lastChild.textContent = mapOpen ? "Ocultar mapa" : "Ver mapa";
     paint();
@@ -153,7 +161,7 @@ export function render(param, query) {
     el("div", { class: "row row--wrap" },
       selector(STATES, filter, (value) => { filter = value; }),
       selector(RANGES.filter((item) => item.days <= snapshot.historyDays), range, (value) => { range = value; }),
-      mapButton),
+      el("div", { class: "row calls__tools", role: "group", "aria-label": "Mapa y llamada en directo" }, mapButton, demoCall.element)),
     search ? el("p", { class: "card__sub" }, `Resultados para «${query.get("buscar")}»`) : null,
     board,
     el("p", { class: "card__sub" }, getPresentation().simulated
@@ -164,13 +172,19 @@ export function render(param, query) {
     if (!mapOpen && selectedId) void loadTranscript(selectedId);
   };
   root.dispose = () => {
+    if (disposed) return;
     disposed = true;
+    window.removeEventListener("pagehide", stopDemo);
+    demoCall.dispose();
     transcriptController?.abort();
     transcriptController = undefined;
     transcript = { status: "idle", data: null };
     transcriptView.dispose();
+    realSignals.dispose();
+    mapView?.dispose();
   };
   paint();
+  window.addEventListener("pagehide", stopDemo);
   return root;
 }
 
@@ -206,6 +220,7 @@ function chatCard(onToggle, transcriptBody) {
     subtitle.textContent = `${call.reason} · ${call.time}`;
     metrics.classList.toggle("is-on", panel === "metrics");
     signals.classList.toggle("is-on", panel === "signals");
+    signals.title = call.simulated ? "Señales simuladas, sin inferencia" : "Abrir análisis textual con Azure (coste separado)";
     duration.textContent = call.duration;
     waveform.hidden = !call.simulated;
     playbackLabel.textContent = call.simulated ? "Onda de ejemplo · sin audio" : "Reproducción no disponible";

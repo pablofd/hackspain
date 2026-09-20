@@ -115,6 +115,57 @@ export function validTranscriptEntry(entry) {
       Number.isFinite(entry.startMs) && Number.isFinite(entry.endMs) && entry.startMs >= 0 && entry.endMs >= entry.startMs));
 }
 
+export const signalToneLabels = {
+  positive: "Positivo", neutral: "Neutro", negative: "Negativo", mixed: "Mixto", unknown: "Indeterminado",
+};
+export const signalIntentLabels = {
+  book: "Pedir cita", reschedule: "Cambiar cita", cancel: "Cancelar cita", register: "Registrarse",
+  clinic_information: "Información de la clínica", privacy_request: "Solicitud de privacidad",
+  medical_advice: "Solicitud de consejo médico", emergency: "Mención de emergencia", other: "Otra intención",
+};
+export const signalPatternLabels = {
+  correction: "Corrección", repetition: "Repetición", uncertainty: "Incertidumbre", urgency: "Urgencia expresada",
+  explicit_confirmation: "Confirmación explícita", declined_offer: "Oferta rechazada", language_switch: "Cambio de idioma",
+  thanks: "Agradecimiento", privacy_boundary: "Límite de privacidad",
+};
+export const signalConfidenceLabels = { low: "Baja", medium: "Media", high: "Alta" };
+
+export async function callSignals(callId, signal) {
+  if (!snapshot?.signalAnalysis?.enabled) throw new Error("signals_disabled");
+  if (typeof callId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(callId)) throw new Error("dashboard_invalid_call_id");
+  const value = await api(`/api/dashboard/calls/${encodeURIComponent(callId)}/signals`, signal, "POST");
+  const timestamp = (date) => typeof date === "string" && Number.isFinite(Date.parse(date));
+  const nullableDate = (date) => date === null || timestamp(date);
+  const count = (number) => Number.isSafeInteger(number) && number >= 0;
+  if (!value || value.callId !== callId || !["ready", "insufficient_data"].includes(value.status) ||
+      value.source !== "azure_text_estimate" || typeof value.model !== "string" || !value.model || value.model.length > 200 ||
+      !nullableDate(value.analyzedAt) || !nullableDate(value.nextRefreshAt) || typeof value.stale !== "boolean" ||
+      !value.coverage || !count(value.coverage.entries) || !count(value.coverage.characters) ||
+      typeof value.coverage.limited !== "boolean" || !Array.isArray(value.evidence) || value.evidence.length > 500 ||
+      value.evidence.some((entry) => !entry || typeof entry.id !== "string" || !entry.id || entry.id.length > 512 ||
+        entry.speaker !== "user" || typeof entry.text !== "string" || entry.text.length > 65536 || !timestamp(entry.timestamp))) {
+    throw new Error("signals_invalid_response");
+  }
+  const ids = new Set(value.evidence.map((entry) => entry.id));
+  const refs = (list) => Array.isArray(list) && list.length <= 500 &&
+    list.every((id) => typeof id === "string" && ids.has(id));
+  const named = (labels, key) => typeof key === "string" && Object.hasOwn(labels, key);
+  const indicator = (item) => item && (item.score === null ||
+    (Number.isFinite(item.score) && item.score >= 0 && item.score <= 100)) && refs(item.evidence);
+  const analysis = value.analysis;
+  if (ids.size !== value.evidence.length || (value.status === "insufficient_data" ? analysis !== null :
+    !analysis || !named(signalToneLabels, analysis.tone) ||
+    !["calmness", "satisfaction", "confusion"].every((key) => indicator(analysis.indicators?.[key])) ||
+    !Array.isArray(analysis.intents) || analysis.intents.length > 500 ||
+    analysis.intents.some((item) => !item || !named(signalIntentLabels, item.kind) ||
+      !named(signalConfidenceLabels, item.confidence) || !refs(item.evidence)) ||
+    !Array.isArray(analysis.patterns) || analysis.patterns.length > 500 ||
+    analysis.patterns.some((item) => !item || !named(signalPatternLabels, item.kind) || !refs(item.evidence)))) {
+    throw new Error("signals_invalid_response");
+  }
+  return value;
+}
+
 export async function createDemoCall(signal) {
   if (!snapshot?.demoCall?.enabled) throw new Error("dashboard_demo_disabled");
   let value;

@@ -1,16 +1,21 @@
 import { el, mount, svg } from "../lib/dom.js";
-import { icon } from "../lib/icons.js";
-import { outcomeLabels, riskLabels } from "../data/api.js";
+import { FINN_THE_HUMAN_PATH, icon } from "../lib/icons.js";
+import { api, formatDate, outcomeLabels, riskLabels } from "../data/api.js";
 import { getPresentation } from "../data/presentation.js";
 import { DEFAULT_RANGE, rangeById, stateLabel } from "../data/insights.js";
 /** Only a patient_id from a BOOK receipt can link separate calls to the same patient. */
 export function people(list) {
   const byCaller = new Map();
   for (const c of list) {
-    const key = c.personKey;
+    const identities = [...new Set(c.patientIds ?? [])];
+    for (const key of identities) {
+    const client = getPresentation().clients.find((person) => person.id === key);
+    const knownName = client?.name || (identities.length === 1 &&
+      !/^(?:Llamada|Paciente)\s/.test(c.caller) ? c.caller : null);
     const e = byCaller.get(key) || {
       id: key,
-      name: c.caller,
+      name: knownName,
+      simulated: c.simulated === true,
       count: 0,
       booked: 0,
       missed: 0,
@@ -23,35 +28,97 @@ export function people(list) {
     e.escalated = e.escalated || c.outcome === "escalated";
     e.calls.push(c);
     byCaller.set(key, e);
+    }
   }
-  return [...byCaller.values()].sort((a, b) => b.missed - a.missed || b.count - a.count);
+  return [...byCaller.values()].sort((a, b) => b.missed - a.missed || b.count - a.count)
+    .map((person, index) => ({ ...person, nameKnown: Boolean(person.name), name: person.name || `Paciente ${index + 1}` }));
 }
 
 export function networkPanel(list = getPresentation().calls, opts = {}) {
-  const { state = "all", range = DEFAULT_RANGE } = opts;
+  let { state = "all", range = DEFAULT_RANGE } = opts;
   const host = el("div", { class: "map-full" });
-  const nodes = people(list);
+  let nodes = people(list);
+  let page = 0;
   let zoom = 1;
   let pan = { x: 0, y: 0 };
   let selected = null;
+  let detailRequest;
+  let detailGeneration = 0;
+  const agendas = new Map();
   const stage = el("div", { class: "map-full__stage" });
   const personHost = el("div", { class: "map-person", hidden: true });
   const zoomLabel = el("span", { class: "mono" }, "100%");
+  const subtitle = el("div", { class: "chat-card__sub truncate" });
+  const tally = el("span", { class: "map-full__tally ml-auto" });
+  const pageLabel = el("span", { class: "mono", "aria-live": "polite" });
+  const previous = el("button", {
+    class: "btn btn--icon", title: "Identificadores anteriores", "aria-label": "Identificadores anteriores",
+    onclick: () => changePage(-1),
+  }, "‹");
+  const next = el("button", {
+    class: "btn btn--icon", title: "Identificadores siguientes", "aria-label": "Identificadores siguientes",
+    onclick: () => changePage(1),
+  }, "›");
 
   function paint() {
-    mount(stage, graph(nodes, zoom, pan, selected, pick));
+    const visible = nodes.slice(page * MAX_NODES, (page + 1) * MAX_NODES);
+    if (visible.length) mount(stage, graph(visible, zoom, pan, selected, pick));
+    else mount(stage, el("div", { class: "empty" }, list.length
+      ? "Sin personas vinculadas a una ficha en este filtro. Las llamadas siguen disponibles en la lista."
+      : "Ninguna llamada con este filtro."));
     zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+    subtitle.textContent = `${stateLabel(state)} · ${rangeById(range).short} · ${visible.length} de ${nodes.length} personas · ${list.length} llamadas`;
+    const totals = nodes.reduce((acc, node) => ({
+      booked: acc.booked + node.booked, missed: acc.missed + node.missed,
+    }), { booked: 0, missed: 0 });
+    mount(tally, `${totals.booked} con reserva comunicada · `,
+      el("strong", { class: "text-alert" }, `${totals.missed} sin acción`));
+    pageLabel.textContent = `${page + 1} / ${Math.max(1, Math.ceil(nodes.length / MAX_NODES))}`;
+    previous.disabled = page === 0;
+    next.disabled = (page + 1) * MAX_NODES >= nodes.length;
   }
 
+  function changePage(direction) {
+    page = Math.max(0, Math.min(Math.ceil(nodes.length / MAX_NODES) - 1, page + direction));
+    selected = null;
+    detailGeneration += 1;
+    detailRequest?.abort();
+    personHost.hidden = true;
+    reset();
+  }
   /* Mover el mapa sólo reescribe el transform: repintarlo entero en cada gesto iría a tirones */
   function applyPan() {
     stage.querySelector(".map__viewport")?.setAttribute("transform", viewport(zoom, pan));
   }
 
   function pick(person) {
-    selected = selected?.id === person.id ? null : person;
+    if (person && selected?.id === person.id) return;
+    if (stage.classList.contains("is-grabbing")) return;
+    selected = person;
+    const generation = ++detailGeneration;
+    detailRequest?.abort();
     personHost.hidden = !selected;
-    if (selected) mount(personHost, personCard(selected, range, () => pick(person)));
+    if (selected) {
+      const current = selected;
+      const cached = agendas.get(current.id);
+      mount(personHost, personCard(current, range, () => pick(null), cached));
+      if (!current.simulated && (!cached || Date.now() - cached.at > 60_000)) {
+        detailRequest = new AbortController();
+        const signal = detailRequest.signal;
+        void api(`/api/dashboard/patients/${encodeURIComponent(current.id)}/appointments`, signal).then((result) => {
+          if (signal.aborted || generation !== detailGeneration || selected?.id !== current.id) return;
+          if (!Array.isArray(result.appointments)) throw new Error("dashboard_invalid_appointments");
+          const agenda = { status: "ok", appointments: result.appointments, at: Date.now() };
+          agendas.set(current.id, agenda);
+          mount(personHost, personCard(current, range, () => pick(null), agenda));
+        }).catch((error) => {
+          if (signal.aborted || generation !== detailGeneration || selected?.id !== current.id) return;
+          const agenda = { status: "error", code: error.message, at: Date.now() };
+          agendas.set(current.id, agenda);
+          mount(personHost, personCard(current, range, () => pick(null), agenda));
+        });
+      }
+    }
     paint();
   }
 
@@ -66,11 +133,6 @@ export function networkPanel(list = getPresentation().calls, opts = {}) {
     paint();
   }
 
-  const totals = nodes.reduce(
-    (acc, n) => ({ booked: acc.booked + n.booked, missed: acc.missed + n.missed }),
-    { booked: 0, missed: 0 },
-  );
-
   mount(
     host,
     el(
@@ -81,24 +143,16 @@ export function networkPanel(list = getPresentation().calls, opts = {}) {
         "div",
         { style: { minWidth: 0 } },
         el("div", { class: "chat-card__title" }, "Red de maio"),
-        el(
-          "div",
-          { class: "chat-card__sub truncate" },
-          `${stateLabel(state)} · ${rangeById(range).short} · ${nodes.length} identificadores · ${list.length} llamadas`,
-        ),
+        subtitle,
       ),
-      el(
-        "span",
-        { class: "map-full__tally ml-auto" },
-        `${totals.booked} con reserva comunicada · `,
-        el("strong", { class: "text-alert" }, `${totals.missed} sin acción`),
-      ),
+      tally,
+      el("div", { class: "row", style: { gap: "6px" } }, previous, pageLabel, next),
       el(
         "div",
         { class: "row", style: { gap: "6px" } },
-        el("button", { class: "btn btn--icon", onclick: () => setZoom(zoom - 0.2), title: "Alejar" }, "−"),
+        el("button", { class: "btn btn--icon", onclick: () => setZoom(zoom - 0.2), title: "Alejar", "aria-label": "Alejar" }, "−"),
         zoomLabel,
-        el("button", { class: "btn btn--icon", onclick: () => setZoom(zoom + 0.2), title: "Ampliar" }, "+"),
+        el("button", { class: "btn btn--icon", onclick: () => setZoom(zoom + 0.2), title: "Ampliar", "aria-label": "Ampliar" }, "+"),
         el("button", { class: "btn btn--sm", onclick: reset }, "Centrar"),
       ),
     ),
@@ -106,10 +160,11 @@ export function networkPanel(list = getPresentation().calls, opts = {}) {
     el(
       "footer",
       { class: "map-full__legend" },
-      el("span", {}, "Pulsa un identificador para desplegar sus llamadas"),
-      el("span", {}, "Una línea por llamada con el agente"),
+      el("span", {}, "Pasa el cursor, enfoca o pulsa una persona para ver su ficha"),
+      el("span", {}, "La selección muestra sus llamadas con el agente; no vínculos entre personas"),
       el("span", { class: "text-alert" }, "Rojo = NO_ACTION recibido"),
-      el("span", { class: "ml-auto" }, "Arrastra para moverte · rueda o + / − para ampliar"),
+      el("span", {}, "Fotos ilustrativas · alias cuando el nombre no está consultado"),
+      el("span", { class: "ml-auto" }, "Arrastra · rueda o + / − para ampliar"),
     ),
   );
 
@@ -167,18 +222,39 @@ export function networkPanel(list = getPresentation().calls, opts = {}) {
     true,
   );
 
-  if (nodes.length) paint();
-  else mount(stage, el("div", { class: "empty" }, "Ninguna llamada con este filtro."));
-
+  host.update = (nextList, nextOptions = {}) => {
+    list = nextList;
+    state = nextOptions.state ?? state;
+    range = nextOptions.range ?? range;
+    nodes = people(list);
+    page = Math.min(page, Math.max(0, Math.ceil(nodes.length / MAX_NODES) - 1));
+    if (selected) {
+      selected = nodes.find((node) => node.id === selected.id) ?? null;
+      personHost.hidden = !selected;
+      if (selected) mount(personHost, personCard(selected, range, () => pick(null), agendas.get(selected.id)));
+    }
+    paint();
+  };
+  host.dispose = () => { detailGeneration += 1; detailRequest?.abort(); };
+  paint();
   return host;
 }
 
 /* Ficha rápida de la persona seleccionada en el mapa */
-function personCard(person, range, onClose) {
+function personCard(person, range, onClose, agenda) {
   const history = person.calls;
   const last = history[0];
   const client = findClient(person, last);
   const missed = history.filter((c) => c.missed);
+  const source = getPresentation();
+  const upcoming = agenda?.appointments?.slice().sort((left, right) => Date.parse(left.start) - Date.parse(right.start))[0];
+  const provider = source.snapshot?.clinic?.providers.find((item) => item.id === upcoming?.providerId);
+  const site = source.snapshot?.clinic?.locations.find((item) => item.id === upcoming?.locationId);
+  const lastReceipt = source.snapshot?.calls.find((call) => call.id === last?.id);
+  const booking = lastReceipt?.actions.find((action) => action.action === "BOOK" && action.patientId === person.id);
+  const bookingProvider = source.snapshot?.clinic?.providers.find((item) => item.id === booking?.providerId);
+  const bookingSite = source.snapshot?.clinic?.locations.find((item) => item.id === booking?.locationId);
+  const bookingPlan = source.snapshot?.clinic?.plans?.find((item) => item.id === booking?.policyId);
 
   return el(
     "article",
@@ -186,18 +262,25 @@ function personCard(person, range, onClose) {
     el(
       "header",
       { class: "map-person__head" },
-      el("span", { class: "avatar", "aria-hidden": "true" }, person.name[0]),
+      person.simulated
+        ? el("img", { class: "map-person__photo", src: portrait(person.id), alt: "Retrato ilustrativo; no es una foto del paciente" })
+        : el("span", { class: "map-person__photo map-person__photo--fallback", role: "img",
+          "aria-label": "Sin fotografía; icono Finn the Human" }, icon("finn", "map-person__photo-icon")),
       el(
         "div",
         { style: { minWidth: 0 } },
         el("div", { class: "map-person__name" }, person.name),
-        el("div", { class: "map-person__meta" }, client ? `${client.id} · ${client.insurer}` : "Sin ficha de paciente"),
+        el("div", { class: "map-person__meta" }, person.nameKnown
+          ? `${client?.insurer ?? "Aseguradora no consultada"}${person.simulated ? " · demo" : ""}`
+          : "Alias de una ficha vinculada; nombre no consultado"),
       ),
       el("button", { class: "btn btn--icon btn--ghost ml-auto", onclick: onClose, "aria-label": "Cerrar" }, "✕"),
     ),
     el(
       "dl",
       { class: "kv" },
+      el("dt", {}, "ID de paciente"),
+      el("dd", { class: "mono" }, person.id),
       el("dt", {}, "Teléfono"),
       el("dd", { class: "mono" }, client?.phone || last?.phone || "—"),
       el("dt", {}, "Llamadas"),
@@ -207,7 +290,26 @@ function personCard(person, range, onClose) {
       el("dt", {}, "Sin acción"),
       el("dd", { class: person.missed ? "text-alert" : "" }, String(person.missed)),
       el("dt", {}, "Próxima cita"),
-      el("dd", {}, "Consultar ficha; no se infiere de /submit"),
+      el("dd", {}, person.simulated ? `${client?.nextAppt ?? "Cita de ejemplo"} · simulada`
+        : agenda?.status === "error" ? `No disponible: ${agenda.code}`
+        : !agenda ? "Consultando agenda del EHR…"
+        : upcoming ? formatDate(upcoming.start) : "Sin citas futuras en el EHR"),
+      el("dt", {}, "Profesional / sede"),
+      el("dd", {}, person.simulated ? "Profesional y sede de ejemplo"
+        : upcoming ? `${provider?.name ?? upcoming.providerId} · ${site?.name ?? upcoming.locationId}`
+        : "Sin cita próxima consultada"),
+      el("dt", {}, "Última llamada"),
+      el("dd", {}, last?.time ?? "No disponible"),
+      el("dt", {}, "Duración"),
+      el("dd", {}, last?.duration ?? "No disponible"),
+      el("dt", {}, "Último resultado"),
+      el("dd", {}, last ? outcomeLabels[last.outcome].text : "No disponible"),
+      el("dt", {}, "Reserva comunicada"),
+      el("dd", {}, person.simulated ? "Reserva de ejemplo · sin envío"
+        : booking?.slot ? `${formatDate(booking.slot)} · ${bookingProvider?.name ?? booking.providerId} · ${bookingSite?.name ?? booking.locationId}`
+        : "Sin BOOK recibido en la última llamada"),
+      el("dt", {}, "Plan usado en la reserva"),
+      el("dd", {}, person.simulated ? "Plan de ejemplo" : bookingPlan?.name ?? booking?.policyId ?? "No consultado"),
     ),
     client &&
       el(
@@ -240,11 +342,15 @@ function personCard(person, range, onClose) {
         "div",
         { class: "map-person__history" },
         el("div", { class: "section-title" }, "Últimas llamadas"),
-        ...history.slice(0, 3).map((h) =>
+        ...history.slice(0, 6).map((h) =>
           el(
             "div",
             { class: "map-person__row" },
-            el("span", { class: "truncate" }, h.reason),
+            el("div", { style: { minWidth: 0 } },
+              el("a", { href: `#/llamadas?llamada=${encodeURIComponent(h.id)}&rango=${encodeURIComponent(range)}`,
+                class: "truncate" }, h.reason),
+              el("div", { class: "cell-sub mono", style: { overflowWrap: "anywhere" } }, `ID: ${h.id}`),
+              el("div", { class: "cell-sub" }, `${h.time} · ${h.duration}`)),
             el("span", { class: "map-person__tag" }, outcomeLabels[h.outcome].text),
           ),
         ),
@@ -263,7 +369,7 @@ function personCard(person, range, onClose) {
 }
 
 function findClient(person, last) {
-  return last?.patientIds.length === 1 ? getPresentation().clients.find((client) => client.id === person.id) : undefined;
+  return last?.patientIds.includes(person.id) ? getPresentation().clients.find((client) => client.id === person.id) : undefined;
 }
 
 /* Si ya estamos en la ficha destino el hash no cambia, así que forzamos el repintado */
@@ -279,6 +385,8 @@ function pill(text, variant) {
 
 const W = 1200;
 const H = 760;
+const MAP_CENTER = { x: W / 2, y: 350 };
+const RADII = [235, 340, 270, 320, 220, 300, 250, 335, 230, 310, 260, 330];
 
 const viewport = (zoom, pan) =>
   `translate(${pan.x.toFixed(1)} ${pan.y.toFixed(1)}) translate(${W / 2} ${H / 2}) scale(${zoom}) translate(${-W / 2} ${-H / 2})`;
@@ -306,28 +414,54 @@ function curve(cx, cy, x, y, angle, bend, t = 0.5) {
   };
 }
 
-const MAX_EDGES = 6;
+const MAX_EDGES = 3;
+const MAX_NODES = 12;
+
+function portrait(id) {
+  return `/design/portraits/portrait-${String(hash(id) % 12 + 1).padStart(2, "0")}.jpg`;
+}
+
+function hash(value) {
+  let result = 2166136261;
+  for (const character of String(value)) result = Math.imul(result ^ character.codePointAt(0), 16777619);
+  return result >>> 0;
+}
+
+/** Stable radial slots with deliberately varied distances from the maio hub. */
+export function layoutPeople(nodes) {
+  const ordered = [...nodes].sort((left, right) => hash(left.id) - hash(right.id) ||
+    String(left.id).localeCompare(String(right.id)));
+  return ordered.map((node, index) => {
+    const angle = -Math.PI / 2 + index * Math.PI * 2 / ordered.length;
+    const radius = RADII[index % RADII.length];
+    return {
+      node,
+      radius,
+      x: MAP_CENTER.x + Math.cos(angle) * radius * 1.35,
+      y: MAP_CENTER.y + Math.sin(angle) * radius * 0.84,
+    };
+  });
+}
+
+function nodeLabel(node) {
+  const name = node.name;
+  return name.length > 23 ? `${name.slice(0, 22)}…` : name;
+}
 
 function graph(nodes, zoom, pan, selected, onSelect) {
   const w = W;
   const h = H;
-  const cx = w / 2;
-  const cy = h / 2;
+  const { x: cx, y: cy } = MAP_CENTER;
   const edges = [];
   const labels = [];
   const dots = [];
+  const clips = [];
 
-  const inner = nodes.slice(0, Math.ceil(nodes.length / 2));
-  const outer = nodes.slice(Math.ceil(nodes.length / 2));
-
-  const place = (list, rx, ry, phase) =>
-    list.forEach((n, i) => {
-      const angle = -Math.PI / 2 + phase + (i / list.length) * Math.PI * 2;
-      const x = cx + Math.cos(angle) * rx;
-      const y = cy + Math.sin(angle) * ry;
+  layoutPeople(nodes).forEach(({ node: n, x, y, radius }) => {
+      const angle = Math.atan2(y - cy, x - cx);
       const isOn = selected?.id === n.id;
-      // El trazo va de centro a centro: los círculos opacos lo rematan en sus bordes
-      const bend = (i % 2 ? 1 : -1) * (18 + (i % 3) * 9);
+      const clipId = `portrait-${hash(n.id)}`;
+      clips.push(svg("clipPath", { id: clipId }, svg("circle", { cx: x, cy: y, r: 29 })));
 
       if (isOn) {
         // Al seleccionar, la relación se abre en una línea por llamada con su desenlace
@@ -350,7 +484,7 @@ function graph(nodes, zoom, pan, selected, onSelect) {
             svg(
               "text",
               { x: at.x, y: at.y - 3, "text-anchor": "middle", class: `map__edge-label${c.missed ? " is-missed" : ""}` },
-              `${c.reason} · ${c.time}`,
+              c.reason.length > 42 ? `${c.reason.slice(0, 41)}…` : c.reason,
             ),
             c.missReason &&
               svg("text", { x: at.x, y: at.y + 11, "text-anchor": "middle", class: "map__edge-why" }, c.missReason),
@@ -366,17 +500,6 @@ function graph(nodes, zoom, pan, selected, onSelect) {
             ),
           );
         }
-      } else {
-        edges.push(
-          svg("path", {
-            d: curve(cx, cy, x, y, angle, bend).d,
-            fill: "none",
-            stroke: n.missed ? "var(--lipstick-red)" : "rgba(var(--ink-rgb), 0.26)",
-            "stroke-opacity": n.missed ? 0.5 : 1,
-            "stroke-width": 0.6 + Math.min(n.count, 6) * 0.22,
-            "stroke-linecap": "round",
-          }),
-        );
       }
 
       dots.push(
@@ -384,18 +507,26 @@ function graph(nodes, zoom, pan, selected, onSelect) {
           "g",
           {
             class: `map__node${isOn ? " is-on" : ""}`,
+            "data-person-id": n.id, "data-x": x, "data-y": y, "data-radius": radius,
+            role: "button", tabindex: 0, "aria-label": `${n.name}, ${n.count} llamadas`,
             onclick: () => onSelect?.(n),
+            onmouseenter: () => onSelect?.(n),
+            onfocus: () => onSelect?.(n),
+            onkeydown: (event) => {
+              if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect?.(n); }
+            },
           },
-          svg("circle", { cx: x, cy: y, r: 23, fill: "var(--white)" }),
-          svg(
-            "text",
-            { x, y: y + 5, "text-anchor": "middle", "font-size": "13", fill: "var(--text-secondary)" },
-            n.name[0],
-          ),
+          svg("title", {}, `${n.name} · ${n.count} llamadas`),
+          svg("circle", { cx: x, cy: y, r: 29, fill: "var(--white)" }),
+          n.simulated
+            ? svg("image", { href: portrait(n.id), x: x - 29, y: y - 29, width: 58, height: 58,
+              "clip-path": `url(#${clipId})`, preserveAspectRatio: "xMidYMid slice" })
+            : svg("g", { class: "map__node-fallback", transform: `translate(${x - 20} ${y - 20}) scale(0.15625)` },
+              svg("path", { d: FINN_THE_HUMAN_PATH })),
           svg("circle", {
             cx: x,
             cy: y,
-            r: 23,
+            r: 29,
             fill: "none",
             stroke: isOn
               ? "var(--pitch-black)"
@@ -404,10 +535,10 @@ function graph(nodes, zoom, pan, selected, onSelect) {
                 : "rgba(var(--ink-rgb), 0.35)",
             "stroke-width": isOn ? 2.4 : n.missed ? 1.8 : 1,
           }),
-          svg("text", { x, y: y + 41, "text-anchor": "middle", class: "map__node-label" }, n.name),
+          svg("text", { x, y: y + 48, "text-anchor": "middle", class: "map__node-label", style: "font-size: 14px" }, nodeLabel(n)),
           svg(
             "text",
-            { x, y: y + 54, "text-anchor": "middle", class: `map__node-sub${n.missed ? " is-missed" : ""}` },
+            { x, y: y + 64, "text-anchor": "middle", class: `map__node-sub${n.missed ? " is-missed" : ""}`, style: "font-size: 12px" },
             n.missed
               ? `${n.missed} sin acción de ${n.count}`
               : `${n.count} ${n.count === 1 ? "llamada" : "llamadas"}`,
@@ -416,21 +547,19 @@ function graph(nodes, zoom, pan, selected, onSelect) {
       );
     });
 
-  place(inner, 300, 210, 0);
-  place(outer, 500, 330, Math.PI / Math.max(outer.length, 1));
-
   return svg(
     "svg",
     { class: "map-full__canvas", viewBox: `0 0 ${w} ${h}`, role: "img", "aria-label": "Red de maio" },
+    svg("defs", {}, ...clips),
     svg(
       "g",
       { class: "map__viewport", transform: viewport(zoom, pan) },
       ...edges,
       ...dots,
-      svg("circle", { cx, cy, r: 56, fill: "var(--pitch-black)" }),
+      svg("circle", { cx, cy, r: 34, fill: "var(--pitch-black)", class: "map__hub" }),
       svg(
         "g",
-        { transform: `translate(${cx - 20} ${cy - 20}) scale(1.65)` },
+        { transform: `translate(${cx - 12} ${cy - 12})` },
         svg("path", {
           d: "M7.5 4.5h9a4.5 4.5 0 0 1 4.5 4.5v4.5a4.5 4.5 0 0 1-4.5 4.5H11l-4.5 3.5 1.25-3.5A4.5 4.5 0 0 1 3 13.5V9a4.5 4.5 0 0 1 4.5-4.5Z",
           fill: "none",
@@ -450,7 +579,7 @@ function graph(nodes, zoom, pan, selected, onSelect) {
       ),
       svg(
         "text",
-        { x: cx, y: cy + 78, "text-anchor": "middle", "font-size": "13", fill: "var(--text-primary)" },
+        { x: cx, y: cy + 52, "text-anchor": "middle", "font-size": "13", fill: "var(--text-primary)" },
         "maio",
       ),
       ...labels,
