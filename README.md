@@ -353,6 +353,8 @@ Generate a private token for our WebSocket endpoint:
 npm run configure
 # If the Azure endpoint is not in either environment file:
 npm run configure -- --endpoint https://your-resource.openai.azure.com
+# Select a built-in Realtime voice without exposing other local settings:
+npm run configure -- --realtime-voice cedar
 ```
 
 Configuration preserves existing secrets, prints no values and sets environment

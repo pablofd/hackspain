@@ -79,6 +79,28 @@ test("configuring output gain preserves endpoint credentials and rejects invalid
   }
 });
 
+test("the safe configurator persists only supported built-in Realtime voices", () => {
+  const directory = mkdtempSync(join(tmpdir(), "hackspain-realtime-voice-"));
+  const path = join(directory, ".env.local");
+  const original = "AZURE_OPENAI_ENDPOINT=https://synthetic.openai.azure.com\nVOICE_ENDPOINT_TOKEN=synthetic-existing-token-unchanged\nPROSPER_API_KEY=synthetic-preserved-key\n";
+  writeFileSync(path, original, { mode: 0o600 });
+  const command = ["--import", import.meta.resolve("tsx"), resolve("scripts/configure-local.ts"), "--realtime-voice"];
+  try {
+    const output = execFileSync(process.execPath, [...command, "cedar"], { cwd: directory, env: {}, encoding: "utf8" });
+    const contents = readFileSync(path, "utf8");
+    assert.ok(contents.startsWith(original));
+    assert.match(contents, /AZURE_OPENAI_VOICE="cedar"/);
+    assert.ok(!output.includes("synthetic-existing-token"));
+    assert.ok(!output.includes("synthetic-preserved-key"));
+    assert.throws(() => execFileSync(process.execPath, [...command, "unknown"], {
+      cwd: directory, env: {}, stdio: "pipe",
+    }));
+    assert.equal(readFileSync(path, "utf8"), contents);
+  } finally {
+    rmSync(directory, { recursive: true });
+  }
+});
+
 test("Live configuration is opt-in, separately bounded, and preserves the default Realtime profile", () => {
   const settings = config({ VOICE_CONNECTOR: "live", VOICE_OUTPUT_GAIN_DB: "9" });
   assert.equal(config().VOICE_CONNECTOR, "realtime");

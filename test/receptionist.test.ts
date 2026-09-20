@@ -1392,6 +1392,13 @@ test("refusal instructions require recording before goodbye and forbid invented 
   assert.match(instructions, /no_other_policy:true/);
 });
 
+test("voice instructions allow restrained natural fillers without weakening critical readbacks", () => {
+  const instructions = receptionistInstructions(new Date("2026-09-18T18:00:00Z"), true);
+  assert.match(instructions, /very occasional brief acknowledgement or hesitation/);
+  assert.match(instructions, /never during names, identifiers, dates, times, prices, consent, readbacks or action status/);
+  assert.match(instructions, /Never repeat fillers, delay a tool call or sacrifice clarity/);
+});
+
 function offered(slots: Slot[], blocked: Availability["blocked"] = []): Availability {
   return {
     providers: [{ id: "PRTEST", name: "Test Doctor", specialty_id: "general_practice", languages: ["en", "es", "ca"] }],
