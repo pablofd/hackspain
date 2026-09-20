@@ -1,23 +1,6 @@
-**Acceso al dashboard:** por seguridad está protegido con un token privado. Contacta por WhatsApp al **658 709 642** para solicitar acceso. No publiques el token ni uses claves de Azure o Prosper para entrar.
+**Acceso al dashboard:** https://espionage-transport-prevalent.ngrok-free.dev/ luego visit site luego token: 2a6eead52574239315c8f8c9dd2747f99f8a1dffe7e8ea4686e31ed52d81c225
 
 # Cachopo - Foundry voice receptionist
-
-## Acceso al dashboard y vídeo de la demo
-
-- **Dashboard público:** https://espionage-transport-prevalent.ngrok-free.dev/
-- **Vídeo de YouTube:** https://www.youtube.com/watch?v=6RbtG0iDtu0
-
-El acceso al dashboard es el enlace anterior, **no Vercel ni localhost**.
-Cualquier visitante puede abrirlo desde Internet. Si ngrok muestra una pantalla
-de aviso, pulsa **Visit Site**. Conecta directamente por túnel HTTPS a esta VM.
-Las llamadas y datos siguen protegidos: requiere el
-token privado renovado. Enlace temporal: funciona mientras la VM, el dashboard
-y el túnel permanezcan activos; puede cambiar al reiniciar el túnel.
-
-El túnel publica únicamente el adaptador del dashboard en `127.0.0.1:4321`,
-incluido su puente autenticado de llamadas demo. No publica el endpoint de voz
-de producción de `7860`, archivos privados ni grabaciones. Vercel es una
-alternativa de despliegue, no un requisito para probar esta demo.
 
 ## Evaluar el dashboard y el agente juntos
 
