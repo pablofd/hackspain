@@ -6,10 +6,11 @@ import { setImmediate as settle, setTimeout as delay } from "node:timers/promise
 import { test, type TestContext } from "node:test";
 import { ROOT_CONTEXT } from "@opentelemetry/api";
 import { z } from "zod";
+import { AppError } from "../src/errors.js";
 import { ProsperClient, type Clinic } from "../src/prosper.js";
 import { actionSchema, type Availability, type ProsperAction, type Slot, type Patient } from "../src/prosper-types.js";
 import type { AddressResolver } from "../src/geography.js";
-import { ConfirmationGate, type OutcomeReviewContext } from "../src/confirmation.js";
+import { ConfirmationGate, privacyRefusalGuidance, type OutcomeReviewContext } from "../src/confirmation.js";
 import { Receptionist, receptionistInstructions, receptionistTools } from "../src/receptionist.js";
 import { registrationReadbackGuidance } from "../src/registration.js";
 
@@ -186,6 +187,33 @@ const bookingSearchSchema = z.object({
   instruction: z.string(),
 });
 
+const nearestBookingSearchSchema = bookingSearchSchema.extend({
+  booking_continuation: z.object({
+    previous_offer_invalidated: z.literal(true),
+    prepare_action: z.object({ request: z.object({
+      action: z.literal("BOOK"), patient_id: z.string(), slot_id: z.string(), policy_id: z.string(),
+    }) }).nullable(),
+  }).optional(),
+});
+const originCandidatesSchema = z.object({
+  status: z.literal("needs_clarification"), reason: z.string(), truncated: z.boolean(),
+  candidates: z.array(z.object({
+    candidate_id: z.string(), label: z.string(),
+    selection_arguments: z.object({ address: z.string(), candidate_id: z.string() }),
+  })),
+  instruction: z.string(),
+});
+const syntheticOriginAddress = "C/ del Ejemplo, 12, Madrid";
+const syntheticOriginCandidate = {
+  id: "synthetic-origin", label: "CALLE DEL EJEMPLO 12, Madrid", kind: "portal" as const,
+  latitude: 40.4, longitude: -3.7,
+};
+const syntheticOriginResolver: Pick<AddressResolver, "resolve"> = {
+  async resolve() {
+    return { source: "cartociudad", status: "resolved", truncated: false, candidates: [syntheticOriginCandidate] };
+  },
+};
+
 async function searchBooking(h: ReturnType<typeof harness>, input: Record<string, unknown> = {}) {
   return bookingSearchSchema.parse(await h.execute("search_availability", {
     patient_id: patient.patient_id, specialty_id: slot.specialty_id, prepare_booking: true, ...input,
@@ -241,6 +269,77 @@ test("unverified identities cannot read appointments or availability and protect
   await h.execute("find_patient", { name: "Ana Prueba Test", national_id: "00000000T" });
   await assert.rejects(h.execute("list_appointments", { patient_id: "PTEST" }));
   assert.equal(h.writes.length, 0);
+});
+
+test("a checksum-valid national identifier misplaced in phone is looked up without losing its letter", async () => {
+  const h = harness({ directory: (url) =>
+    url.searchParams.get("national_id") === patient.national_id && !url.searchParams.has("phone") ? [patient] : [] });
+  const raw = await h.execute("find_patient", { name: "Ana Prueba Test", phone: "1234 5678-z" });
+  const matches = z.object({ matches: z.array(z.object({ verified: z.boolean() })) }).parse(raw).matches;
+  assert.equal(matches[0]?.verified, true);
+  const result = z.object({
+    identifier_input_adjustment: z.literal("national_id_from_phone"),
+    matches: z.array(z.object({ verified: z.boolean() })),
+  }).parse(raw);
+  assert.equal(result.matches[0]?.verified, true);
+  assert.equal(h.requests.length, 1);
+  assert.equal(h.requests[0]?.searchParams.get("national_id"), patient.national_id);
+  assert.equal(h.requests[0]?.searchParams.has("phone"), false);
+  assert.ok(!JSON.stringify(result).includes(patient.national_id));
+  assert.ok(!JSON.stringify(result).includes(patient.phone));
+  await h.execute("list_appointments", { patient_id: patient.patient_id });
+  assert.equal(h.writes.length, 0);
+});
+
+test("misplaced identifier repair never removes an explicit conflicting national identifier", async () => {
+  const h = harness();
+  await assert.rejects(h.execute("find_patient", {
+    name: "Ana Prueba Test", national_id: "00000000T", phone: patient.national_id,
+  }), { code: "conflicting_lookup_identifiers" });
+  assert.equal(h.requests.length, 0);
+  await assert.rejects(h.execute("list_appointments", { patient_id: patient.patient_id }), { code: "patient_unverified" });
+});
+
+test("a national-ID-shaped value with a wrong checksum is never repaired or sent as a phone", async () => {
+  const h = harness();
+  await assert.rejects(h.execute("find_patient", {
+    name: "Ana Prueba Test", phone: "12345678A",
+  }), { code: "invalid_identifier_in_phone" });
+  assert.equal(h.requests.length, 0);
+  assert.equal(h.writes.length, 0);
+});
+
+test("identifier field correction supports NIE but never invents a name or counts a repeated ID twice", async () => {
+  const niePatient = { ...patient, national_id: "X1234567L" };
+  const h = harness({ patients: [niePatient] });
+  const verified = z.object({ matches: z.array(z.object({ verified: z.boolean() })) }).parse(
+    await h.execute("find_patient", { name: "Ana Prueba Test", phone: "x-1234567-l" }),
+  );
+  assert.equal(verified.matches[0]?.verified, true);
+  assert.equal(h.requests[0]?.searchParams.get("national_id"), niePatient.national_id);
+  assert.equal(h.requests[0]?.searchParams.has("phone"), false);
+  const noName = harness();
+  const result = z.object({
+    needs_full_name: z.literal(true), matches: z.array(z.object({ verified: z.boolean() })),
+  }).parse(await noName.execute("find_patient", { national_id: patient.national_id, phone: patient.national_id }));
+  assert.equal(result.matches[0]?.verified, false);
+  await assert.rejects(noName.execute("list_appointments", { patient_id: patient.patient_id }), { code: "patient_unverified" });
+});
+
+test("ordinary phone and explicit national-ID lookups keep their supplied field semantics", async () => {
+  for (const fields of [
+    { phone: "+34 612 345 678" },
+    { national_id: patient.national_id, phone: "+34 612 345 678" },
+    { phone: "12345678" },
+  ]) {
+    const h = harness();
+    const result = z.object({ identifier_input_adjustment: z.string().optional() }).parse(
+      await h.execute("find_patient", { name: "Ana Prueba Test", ...fields }),
+    );
+    assert.equal(result.identifier_input_adjustment, undefined);
+    assert.equal(h.requests[0]?.searchParams.get("phone"), fields.phone);
+    assert.equal(h.requests[0]?.searchParams.get("national_id"), "national_id" in fields ? fields.national_id : null);
+  }
 });
 
 test("an incomplete name asks for the full name rather than cycling a matching identifier", async () => {
@@ -1293,6 +1392,13 @@ test("refusal instructions require recording before goodbye and forbid invented 
   assert.match(instructions, /no_other_policy:true/);
 });
 
+test("voice instructions allow restrained natural fillers without weakening critical readbacks", () => {
+  const instructions = receptionistInstructions(new Date("2026-09-18T18:00:00Z"), true);
+  assert.match(instructions, /very occasional brief acknowledgement or hesitation/);
+  assert.match(instructions, /never during names, identifiers, dates, times, prices, consent, readbacks or action status/);
+  assert.match(instructions, /Never repeat fillers, delay a tool call or sacrifice clarity/);
+});
+
 function offered(slots: Slot[], blocked: Availability["blocked"] = []): Availability {
   return {
     providers: [{ id: "PRTEST", name: "Test Doctor", specialty_id: "general_practice", languages: ["en", "es", "ca"] }],
@@ -1783,6 +1889,77 @@ test("Adversarial: lookup and call state never expose stored DNI or phone even i
   assert.deepEqual(h.writes[0], { call_id: "real-call-from-start", reason: "out_of_scope" });
 });
 
+test("privacy-only requests cannot submit caller_not_authorised before the correct out_of_scope refusal", async () => {
+  const gate = new ConfirmationGate(() => 1, new AbortController().signal);
+  const h = harness({ beforeOutcome: (turn, reason, context) => gate.reviewOutcome(turn, reason, context) });
+  gate.observe(1, "Can you tell me which clinician my neighbour is seeing next? I do not have her identifiers.");
+  await assert.rejects(h.execute("report_outcome", { action: "NO_ACTION", reason: "caller_not_authorised" }), {
+    code: "privacy_outcome_requires_out_of_scope",
+  });
+  assert.equal(h.writes.length, 0);
+  assert.equal(h.requests.length, 0);
+  const result = await h.execute("report_outcome", { action: "NO_ACTION", reason: "out_of_scope" });
+  assert.equal(z.object({ status: z.literal("accepted") }).parse(result).status, "accepted");
+  await h.execute("report_outcome", { action: "NO_ACTION", reason: "out_of_scope" });
+  assert.deepEqual(h.writes, [{ call_id: "real-call-from-start", reason: "out_of_scope" }]);
+  assert.deepEqual(h.requests.map((url) => url.pathname), ["/api/v1/submit/no-action"]);
+});
+
+test("privacy refusal guidance is shared by the runtime prompt and the reason schema", () => {
+  const tool = receptionistTools.find((tool) => tool.name === "report_outcome")!;
+  const parameters = z.object({
+    properties: z.object({ reason: z.object({ description: z.string() }) }),
+  }).parse(tool.parameters);
+  assert.equal(parameters.properties.reason.description, privacyRefusalGuidance);
+  assert.ok(receptionistInstructions(new Date("2026-09-19T12:00:00Z"), true).includes(privacyRefusalGuidance));
+});
+
+test("privacy review never rewrites an already accepted authorization refusal", async () => {
+  let turn = 1;
+  const gate = new ConfirmationGate(() => turn, new AbortController().signal);
+  const h = harness({ beforeOutcome: (turn, reason, context) => gate.reviewOutcome(turn, reason, context) });
+  gate.observe(1, "I want to cancel my mother's appointment, but she has not given me permission.");
+  await h.execute("report_outcome", { action: "NO_ACTION", reason: "caller_not_authorised" });
+  h.nextTurn();
+  turn = 2;
+  gate.observe(2, "Can you read the phone number you have on file for her?");
+  await h.execute("report_outcome", { action: "NO_ACTION", reason: "caller_not_authorised" });
+  await assert.rejects(h.execute("report_outcome", { action: "NO_ACTION", reason: "out_of_scope" }), {
+    code: "outcome_already_submitted",
+  });
+  assert.deepEqual(h.writes, [{ call_id: "real-call-from-start", reason: "caller_not_authorised" }]);
+});
+
+test("an accepted cancellation is not polluted by an out-of-scope farewell after a declined offer", async () => {
+  let turn = 1;
+  const gate = new ConfirmationGate(() => turn, new AbortController().signal);
+  const h = harness({
+    beforeConfirmation: (turn) => gate.review(turn),
+    beforeOutcome: (turn, reason, context) => gate.reviewOutcome(turn, reason, context),
+  });
+  await identify(h);
+  await h.execute("list_appointments", { patient_id: patient.patient_id });
+  const proposal = z.object({ proposal_id: z.string() }).parse(
+    await h.execute("prepare_action", { request: { action: "CANCEL", appointment_id: appointment.appointment_id } }),
+  );
+  h.nextTurn();
+  turn = 2;
+  gate.observe(2, "Yes, please cancel that appointment.");
+  await h.execute("confirm_action", { proposal_id: proposal.proposal_id, confirmed: true });
+  h.nextTurn();
+  turn = 3;
+  const availability = z.object({ request_id: z.string() }).parse(
+    await h.execute("search_availability", { patient_id: patient.patient_id, specialty_id: "general_practice" }),
+  );
+  gate.observe(3, "I'll leave it for now, thanks.");
+  await assert.rejects(h.execute("report_outcome", {
+    action: "NO_ACTION", reason: "out_of_scope", request_id: availability.request_id,
+  }), { code: "outcome_reason_not_supported" });
+  assert.deepEqual(h.writes, [{ call_id: "real-call-from-start", appointment_id: appointment.appointment_id }]);
+  assert.deepEqual(h.requests.filter((url) => url.pathname.startsWith("/api/v1/submit/")).map((url) => url.pathname),
+    ["/api/v1/submit/cancel"]);
+});
+
 test("Nearest Site skips a closer site that cannot serve the request and uses the next viable one", async () => {
   const h = harness({
     clinic: {
@@ -1815,6 +1992,308 @@ test("Nearest Site skips a closer site that cannot serve the request and uses th
   assert.ok(!h.requests.some((url) => url.searchParams.get("location_id") === "far"));
 });
 
+test("origin selection arguments preserve the original query and distinguish edited addresses from missing candidates", async () => {
+  const queries: string[] = [];
+  const h = harness({ addressResolver: { async resolve(address) {
+    queries.push(address);
+    return { source: "cartociudad", status: "needs_clarification", reason: "ambiguous", truncated: true,
+      candidates: [syntheticOriginCandidate, {
+        ...syntheticOriginCandidate, id: "synthetic-other", label: "CALLE DEL EJEMPLO 14, Madrid",
+      }] };
+  } } });
+  const result = originCandidatesSchema.parse(await h.execute("locate_origin", { address: syntheticOriginAddress }));
+  const selected = result.candidates[0]!;
+  assert.deepEqual(selected.selection_arguments, {
+    address: syntheticOriginAddress, candidate_id: selected.candidate_id,
+  });
+  assert.notEqual(selected.label, syntheticOriginAddress);
+  assert.equal(result.reason, "ambiguous");
+  assert.equal(result.truncated, true);
+  assert.match(result.instruction, /selection_arguments.*unchanged/i);
+  assert.deepEqual(h.records.at(-1), {
+    type: "tool", name: "locate_origin", status: "ok",
+    details: { origin_resolved: false, candidate_count: 2, candidates_truncated: true },
+  });
+  await assert.rejects(h.execute("locate_origin", {
+    ...selected.selection_arguments, address: selected.label,
+  }), { code: "address_candidate_address_mismatch", message: /selection_arguments.*omit candidate_id/i });
+  assert.deepEqual(z.object({ details: z.unknown() }).parse(h.records.at(-1)).details, {
+    candidate_supplied: true, candidate_available: true, address_matches_candidate: false, candidate_count: 2,
+  });
+  const origin = z.object({ origin_id: z.string() }).parse(
+    await h.execute("locate_origin", selected.selection_arguments),
+  );
+  assert.ok(origin.origin_id);
+  assert.deepEqual(h.records.at(-1), {
+    type: "tool", name: "locate_origin", status: "ok",
+    details: { origin_resolved: true, candidate_count: 1, candidates_truncated: false },
+  });
+  for (const candidate_id of [selected.candidate_id, "address-never-issued"]) {
+    await assert.rejects(h.execute("locate_origin", { address: syntheticOriginAddress, candidate_id }), {
+      code: "address_candidate_not_found", message: /omit candidate_id.*fresh candidates/i,
+    });
+    assert.deepEqual(z.object({ details: z.unknown() }).parse(h.records.at(-1)).details, {
+      candidate_supplied: true, candidate_available: false, address_matches_candidate: false, candidate_count: 0,
+    });
+  }
+  assert.deepEqual(queries, [syntheticOriginAddress]);
+  assert.equal(h.requests.length, 0);
+  assert.equal(h.writes.length, 0);
+  for (const value of [syntheticOriginAddress, selected.label, selected.candidate_id, origin.origin_id]) {
+    assert.ok(!JSON.stringify(h.records).includes(value));
+  }
+});
+
+test("origin selection cannot reuse an earlier shortlist after the public address is corrected", async () => {
+  const h = harness({ addressResolver: { async resolve() {
+    return { source: "cartociudad", status: "needs_clarification", reason: "address_mismatch",
+      truncated: false, candidates: [syntheticOriginCandidate] };
+  } } });
+  const first = originCandidatesSchema.parse(await h.execute("locate_origin", { address: syntheticOriginAddress }));
+  const oldSelection = first.candidates[0]!.selection_arguments;
+  const correctedAddress = "Calle del Segundo Ejemplo 8, Madrid";
+  await assert.rejects(h.execute("locate_origin", { ...oldSelection, address: correctedAddress }),
+    { code: "address_candidate_address_mismatch" });
+  const corrected = originCandidatesSchema.parse(await h.execute("locate_origin", { address: correctedAddress }));
+  await assert.rejects(h.execute("locate_origin", oldSelection), { code: "address_candidate_not_found" });
+  assert.deepEqual(z.object({ details: z.unknown() }).parse(h.records.at(-1)).details, {
+    candidate_supplied: true, candidate_available: false, address_matches_candidate: false, candidate_count: 1,
+  });
+  const current = corrected.candidates[0]!.selection_arguments;
+  assert.equal(current.address, correctedAddress);
+  assert.notEqual(current.candidate_id, oldSelection.candidate_id);
+  await h.execute("locate_origin", current);
+  assert.equal(h.writes.length, 0);
+});
+
+test("address validation errors distinguish local formatting from an unavailable or nonexistent location", async () => {
+  const h = harness({ addressResolver: {
+    async resolve() { throw new AppError("invalid_public_address"); },
+  } });
+  await assert.rejects(h.execute("locate_origin", { address: syntheticOriginAddress }), {
+    code: "invalid_public_address",
+    message: /No geocoder request was made.*not proof that the street does not exist/,
+  });
+  assert.equal(h.writes.length, 0);
+});
+
+test("an unmatched origin never offers a different street or portal as a substitute", async () => {
+  const h = harness({ addressResolver: {
+    async resolve() {
+      return { source: "cartociudad", status: "needs_clarification", reason: "address_mismatch",
+        truncated: true, candidates: [] };
+    },
+  } });
+  const result = z.object({ candidates: z.array(z.unknown()), instruction: z.string() })
+    .parse(await h.execute("locate_origin", { address: syntheticOriginAddress }));
+  assert.equal(result.candidates.length, 0);
+  assert.match(result.instruction, /Do not suggest a different street or portal/);
+  assert.match(result.instruction, /do not claim a closest site/);
+  assert.equal(h.writes.length, 0);
+});
+test("origin error diagnostics contain only selection booleans and counts, never raw query or argument values", async () => {
+  const h = harness({ addressResolver: { async resolve() {
+    throw new AppError("geocoder_timeout", "UPSTREAM_PRIVATE_SENTINEL");
+  } } });
+  await assert.rejects(h.execute("locate_origin", { address: syntheticOriginAddress }), {
+    code: "geocoder_timeout", message: /temporarily unavailable/,
+  });
+  assert.deepEqual(z.object({ details: z.unknown() }).parse(h.records.at(-1)).details, {
+    candidate_supplied: false, candidate_available: false, address_matches_candidate: false, candidate_count: 0,
+  });
+  for (const args of [
+    '{"BROKEN_JSON_SENTINEL"', "null", '["ARRAY_SENTINEL"]',
+    JSON.stringify({ address: { name: "OBJECT_SENTINEL" }, candidate_id: 1 }),
+    JSON.stringify({
+      address: "ADDRESS_SENTINEL", candidate_id: "CANDIDATE_SENTINEL",
+      name: "NAME_SENTINEL", national_id: "NATIONAL_ID_SENTINEL", phone: "PHONE_SENTINEL",
+    }),
+  ]) {
+    await assert.rejects(h.engine.execute("locate_origin", args, 1), { code: "invalid_tool_arguments" });
+    const { validation_issues, ...diagnostics } = z.object({
+      details: z.object({ validation_issues: z.array(z.unknown()) }).passthrough(),
+    }).parse(h.records.at(-1)).details;
+    assert.ok(validation_issues.length);
+    assert.ok(Object.values(diagnostics).every((value) => typeof value === "boolean" || typeof value === "number"));
+  }
+  assert.ok(!JSON.stringify(h.records).includes("SENTINEL"));
+  assert.ok(!JSON.stringify(h.records).includes(syntheticOriginAddress));
+  assert.equal(h.writes.length, 0);
+});
+
+test("nearest BOOK continuation supplies a fresh preparation after invalidating the old offer, never old consent", async () => {
+  const h = harness({ addressResolver: syntheticOriginResolver });
+  await identify(h);
+  const first = await searchBooking(h);
+  assert.ok(first.booking_proposal);
+  h.nextTurn();
+  const origin = z.object({ origin_id: z.string() }).parse(
+    await h.execute("locate_origin", { address: syntheticOriginAddress }),
+  );
+  const nearest = nearestBookingSearchSchema.parse(await h.execute("search_availability", {
+    patient_id: patient.patient_id, request_id: first.request_id, nearest_origin_id: origin.origin_id,
+  }));
+  assert.equal(nearest.booking_proposal, null);
+  assert.ok(nearest.booking_continuation?.previous_offer_invalidated);
+  const preparation = nearest.booking_continuation.prepare_action;
+  assert.deepEqual(preparation, { request: {
+    action: "BOOK", patient_id: patient.patient_id, slot_id: nearest.slots[0]!.slot_id, policy_id: patient.insurer,
+  } });
+  assert.match(nearest.instruction, /earlier BOOK offer.*invalid/i);
+  assert.match(nearest.instruction, /location\/direction questions.*clinic facts/i);
+  assert.match(nearest.instruction, /do not invent.*routes/i);
+  assert.match(nearest.instruction, /booking_continuation\.prepare_action/);
+  assert.match(nearest.instruction, /new.*confirming caller turn/i);
+  assert.equal(z.object({ actions: z.array(z.unknown()) }).parse(await h.execute("get_call_state", {})).actions.length, 0);
+  assert.equal(h.writes.length, 0);
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: first.booking_proposal.proposal_id, confirmed: true,
+  }), { code: "proposal_not_found" });
+  const fresh = z.object({ proposal_id: z.string() }).parse(await h.execute("prepare_action", preparation));
+  assert.notEqual(fresh.proposal_id, first.booking_proposal.proposal_id);
+  await assert.rejects(h.execute("confirm_action", { proposal_id: fresh.proposal_id, confirmed: true }),
+    { code: "confirmation_requires_new_turn" });
+  assert.equal(h.writes.length, 0);
+  h.nextTurn();
+  await h.execute("confirm_action", { proposal_id: fresh.proposal_id, confirmed: true });
+  assert.deepEqual(h.writes, [{
+    call_id: "real-call-from-start", patient_id: patient.patient_id,
+    provider_id: slot.provider_id, location_id: slot.location_id,
+    appointment_type_id: slot.appointment_type_id, slot: slot.start_time, policy_id: patient.insurer,
+  }]);
+});
+
+test("nearest BOOK continuation reuses explicit prepare_booking and never selects among multiple held policies", async () => {
+  for (const multiplePolicies of [false, true]) {
+    const h = harness({ addressResolver: syntheticOriginResolver,
+      slots: [{ ...slot, payable_with: ["mapfre", "sanitas"] }] });
+    await identify(h);
+    const first = await searchBooking(h);
+    assert.ok(first.booking_proposal);
+    h.nextTurn();
+    const origin = z.object({ origin_id: z.string() }).parse(
+      await h.execute("locate_origin", { address: syntheticOriginAddress }),
+    );
+    const nearest = nearestBookingSearchSchema.parse(await h.execute("search_availability", {
+      patient_id: patient.patient_id, request_id: first.request_id, nearest_origin_id: origin.origin_id,
+      prepare_booking: true, ...(multiplePolicies ? { additional_policy: "sanitas" } : {}),
+    }));
+    assert.ok(nearest.booking_continuation);
+    assert.equal(nearest.booking_continuation.prepare_action, null);
+    if (multiplePolicies) {
+      assert.equal(nearest.booking_proposal, null);
+      assert.match(nearest.instruction, /Multiple eligible held policies require explicit selection/);
+    } else {
+      assert.ok(nearest.booking_proposal);
+      assert.notEqual(nearest.booking_proposal.proposal_id, first.booking_proposal.proposal_id);
+      assert.match(nearest.instruction, /already prepared, NOT submitted/);
+      await assert.rejects(h.execute("confirm_action", {
+        proposal_id: nearest.booking_proposal.proposal_id, confirmed: true,
+      }), { code: "confirmation_requires_new_turn" });
+    }
+    await assert.rejects(h.execute("confirm_action", {
+      proposal_id: first.booking_proposal.proposal_id, confirmed: true,
+    }), { code: "proposal_not_found" });
+    assert.equal(h.writes.length, 0);
+  }
+});
+
+test("nearest continuation does not invent booking intent for read-only, independent or RESCHEDULE searches", async () => {
+  for (const mode of ["read_only", "independent", "reschedule", "later_reschedule"] as const) {
+    const h = harness({
+      addressResolver: syntheticOriginResolver,
+      ...(mode === "later_reschedule" ? { appointments: [laterAppointment], slots: [laterSlot] } : {}),
+    });
+    await identify(h);
+    let requestId: string | undefined;
+    if (mode === "independent") await searchBooking(h);
+    if (mode === "reschedule") requestId = (await proposeScheduling(h, "RESCHEDULE")).request_id;
+    if (mode === "later_reschedule") {
+      await h.execute("list_appointments", { patient_id: patient.patient_id });
+      const first = await searchLater(h);
+      requestId = first.request_id;
+      assert.ok(first.reschedule.prepare_action);
+      await h.execute("prepare_action", first.reschedule.prepare_action);
+    }
+    h.nextTurn();
+    const origin = z.object({ origin_id: z.string() }).parse(
+      await h.execute("locate_origin", { address: syntheticOriginAddress }),
+    );
+    const raw = await h.execute("search_availability", {
+      patient_id: patient.patient_id, specialty_id: slot.specialty_id, nearest_origin_id: origin.origin_id,
+      ...(requestId ? { request_id: requestId } : {}),
+      ...(mode === "independent" ? { new_request: true } : {}),
+      ...(mode === "later_reschedule" ? { relax_constraints: ["location"] } : {}),
+    });
+    const result = nearestBookingSearchSchema.parse(raw);
+    assert.ok(result.slots.length);
+    assert.equal(result.booking_continuation, undefined);
+    assert.equal(result.booking_proposal, null);
+    if (mode === "later_reschedule") assert.equal(laterSearchSchema.parse(raw).reschedule.prepare_action?.request.action, "RESCHEDULE");
+    const state = z.object({ actions: z.array(z.object({ action: z.string() })) }).parse(await h.execute("get_call_state", {}));
+    assert.equal(state.actions.length, mode === "independent" ? 1 : 0);
+    await h.engine.close();
+    assert.equal(h.writes.length, 0);
+  }
+});
+
+test("empty nearest re-search invalidates a BOOK draft without preparing or forcing a terminal action", async () => {
+  let searches = 0;
+  const h = harness({ addressResolver: syntheticOriginResolver,
+    availability: () => offered(++searches === 1 ? [slot] : []) });
+  await identify(h);
+  const first = await searchBooking(h, { date_from: "2026-09-19", date_to: "2026-09-19" });
+  assert.ok(first.booking_proposal);
+  h.nextTurn();
+  const origin = z.object({ origin_id: z.string() }).parse(
+    await h.execute("locate_origin", { address: syntheticOriginAddress }),
+  );
+  const nearest = nearestBookingSearchSchema.parse(await h.execute("search_availability", {
+    patient_id: patient.patient_id, request_id: first.request_id, nearest_origin_id: origin.origin_id,
+  }));
+  assert.equal(nearest.slots.length, 0);
+  assert.equal(nearest.booking_continuation, undefined);
+  assert.equal(nearest.booking_proposal, null);
+  assert.deepEqual(nearest.no_booking?.reason_candidates, ["no_availability"]);
+  await assert.rejects(h.execute("confirm_action", {
+    proposal_id: first.booking_proposal.proposal_id, confirmed: true,
+  }), { code: "proposal_not_found" });
+  await h.engine.close();
+  assert.equal(h.writes.length, 0);
+});
+
+test("clinic access questions preserve the nearest offer without re-geocoding or implying confirmation", async () => {
+  let originLookups = 0;
+  const h = harness({ addressResolver: {
+    async resolve() {
+      originLookups += 1;
+      return { source: "cartociudad", status: "resolved", truncated: false, candidates: [syntheticOriginCandidate] };
+    },
+  } });
+  await identify(h);
+  const origin = z.object({ origin_id: z.string() }).parse(
+    await h.execute("locate_origin", { address: syntheticOriginAddress }),
+  );
+  const availability = await searchBooking(h, { nearest_origin_id: origin.origin_id });
+  assert.ok(availability.booking_proposal);
+  h.nextTurn();
+  const information = z.object({
+    locations: z.array(z.object({ id: z.string(), address: z.string() })),
+  }).parse(await h.execute("get_clinic", { section: "locations" }));
+  assert.equal(information.locations[0]?.address, clinic.locations[0]?.address);
+  const state = z.object({ actions: z.array(z.object({ proposal_id: z.string(), status: z.string() })) })
+    .parse(await h.execute("get_call_state", {}));
+  assert.ok(state.actions.some((action) =>
+    action.proposal_id === availability.booking_proposal!.proposal_id && action.status === "proposed"));
+  assert.equal(originLookups, 1);
+  assert.equal(h.writes.length, 0);
+  const instructions = receptionistInstructions(new Date("2026-09-19T12:00:00Z"), true);
+  assert.match(instructions, /does not publish entrances, floors or turn-by-turn directions/);
+  assert.match(instructions, /agreement about a location is not booking consent/);
+  h.nextTurn();
+  await h.execute("confirm_action", { proposal_id: availability.booking_proposal.proposal_id, confirmed: true });
+  assert.equal(h.writes.length, 1);
+});
 test("Questions are answered from the catalogue without losing published hours or provider titles", async () => {
   const h = harness();
   const result = z.object({

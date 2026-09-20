@@ -1,6 +1,112 @@
-https://hackspain-git-main-pablofds-projects.vercel.app/
-1812d1a97211d22aae243259df9e7672bdf6dc08a3629313802789ac03150774
+**Acceso al dashboard:** por seguridad está protegido con un token privado. Contacta por WhatsApp al **658 709 642** para solicitar acceso. No publiques el token ni uses claves de Azure o Prosper para entrar.
+
 # Cachopo - Foundry voice receptionist
+
+[**Ver vídeo de la demo en YouTube**](https://www.youtube.com/watch?v=6RbtG0iDtu0)
+
+[Abrir dashboard](https://hackspain-git-main-pablofds-projects.vercel.app/)
+· Requiere un despliegue operativo y el token privado. Este enlace de rama puede
+pedir además acceso a Vercel; para visitantes utiliza el dominio de producción.
+
+## Evaluar el dashboard y el agente juntos
+
+`main` incorpora mediante la PR #1 el dashboard funcional de
+`integration/dashboard-platform` y el backend actualizado de
+`integration/dashboard`, incluida la configuración de voz Cedar. La integración
+se prepara en `integration/dashboard-main`. La rama
+`platform` es únicamente el mockup; no es el submission integrado.
+
+Desde la raíz del repositorio, con Node.js 24+:
+
+```sh
+npm ci
+# Configurar las credenciales privadas siguiendo Setup, más abajo.
+npm run build
+npm start                         # Terminal 1: backend, 127.0.0.1:7860
+npm run dashboard                 # Terminal 2: dashboard, 127.0.0.1:4321
+```
+
+Configura el token independiente en `.local/dashboard.env` siguiendo
+[dashboard integration](#read-only-dashboard-integration). Ambos procesos
+deben permanecer activos. El selector **Demo visual** muestra datos ficticios;
+**Datos reales** consulta las fuentes autenticadas. La llamada con micrófono
+usa Azure de pago, pero no envía acciones clínicas.
+
+### Despliegue en Vercel
+
+El frontend es estático (`dashboard/`), pero desplegar solo esa carpeta **no
+despliega el backend**. El adaptador Node del dashboard necesita acceso a los
+registros privados locales, credenciales y una conexión WebSocket persistente
+para las llamadas. Mantén ambos procesos en la VM detrás de HTTPS/WSS.
+
+Importa `main` en Vercel con la raíz del repositorio y el preset **Other**.
+`vercel.json` ejecuta `npm run build:dashboard` y genera Build Output API v3.
+Configura en Vercel **solo** `DASHBOARD_BACKEND_ORIGIN`, por ejemplo
+`https://dashboard-backend.example.com` (sin barra final), apuntando al
+adaptador de `4321`, no al servidor de voz de `7860`.
+En `.local/dashboard.env` de la VM configura
+`DASHBOARD_PUBLIC_ORIGIN=https://tu-dashboard.vercel.app`, la URL exacta del
+frontend sin barra final, y reinicia únicamente el dashboard cuando no tenga
+llamadas demo activas. El proxy HTTPS del backend debe conservar Host, Origin,
+Authorization y el upgrade WebSocket.
+
+Las lecturas y el análisis NLP usan `/api/dashboard/*` mediante un rewrite HTTP
+autenticado y sin caché. El audio conecta directamente por WSS al adaptador:
+no depende de que Vercel haga proxy del upgrade. Los tickets siguen siendo de
+un solo uso y ligados al origen exacto. Los previews con otro dominio no
+autorizan llamadas ni análisis hasta configurar explícitamente ese origen.
+Azure, Prosper, registros y token permanecen en la VM; nunca los añadas a las
+variables del frontend ni al repositorio. El visitante introduce el token en
+el formulario y este permanece solo en memoria.
+
+Después del despliegue, comprueba login, Configuración, Señales y una llamada
+con micrófono solicitada explícitamente. La preparación se prueba localmente;
+no se afirma que se haya publicado o verificado una URL Vercel real.
+
+#### Ajustes exactos para el proyecto existente
+
+| Vercel → Settings | Valor |
+| --- | --- |
+| Git → Production Branch | `main` |
+| Build and Deployment → Root Directory | Raíz del repositorio, no `dashboard/` |
+| Framework Preset | `Other` |
+| Build Command | `npm run build:dashboard` (definido en `vercel.json`) |
+| Install Command | `npm ci` |
+| Output Directory | Sin override; el script genera `.vercel/output` con Build Output API v3 |
+| Node.js Version | `24.x` |
+| Environment Variables → `DASHBOARD_BACKEND_ORIGIN` | Origen HTTPS público del adaptador de `4321`, sin `/` final, usuario, contraseña ni ruta |
+
+Selecciona **Production** para la variable y también **Preview** si quieres
+compilar previews. Después abre **Deployments → último despliegue de main →
+Redeploy**. Los cambios de variables no actualizan despliegues anteriores.
+No uses `npm start` como Build Command: abre el servidor de voz, no genera el
+frontend.
+
+**Primero debe existir el backend público.** Un `127.0.0.1:4321` de la VM no
+es accesible desde Vercel ni desde el navegador del visitante. Configura un
+dominio HTTPS estable con un proxy hacia ese puerto, incluyendo WSS, y conserva
+los procesos `npm start` y `npm run dashboard` en la VM. No redirijas al puerto
+`7860`: allí no existe `/api/dashboard/snapshot`. Sin
+`DASHBOARD_BACKEND_ORIGIN` el build falla explícitamente en lugar de publicar
+un login que no pueda conectar.
+
+**Acceso de los evaluadores.** En **Settings → Domains**, copia el dominio de
+producción y úsalo también como `DASHBOARD_PUBLIC_ORIGIN` en la VM. Revisa
+**Settings → Deployment Protection → Vercel Authentication**: para que alguien
+sin cuenta del equipo entre, el dominio que compartas no debe exigir ese login
+(o debes concederle acceso mediante las opciones de Vercel). Desactivar esa
+barrera para producción no elimina nuestro formulario ni el token: la API
+sigue autenticada. No añadas tokens de bypass a URLs públicas.
+
+**Token expuesto anteriormente:** si se publicó en un README, considéralo
+comprometido aunque ya se haya retirado de la última versión. Sustituye
+`DASHBOARD_TOKEN` por uno nuevo y aleatorio en la configuración privada de la
+VM, reinicia solo el dashboard sin llamadas demo activas y distribúyelo por
+privado. No vuelvas a publicar el valor ni lo configures en el frontend.
+
+Si sigue fallando, abre los **Build Logs** del despliegue concreto. Un estado
+fallido en GitHub no identifica por sí solo la causa; el login SSO de Vercel es
+otra barrera distinta del build y del token del dashboard.
 
 A TypeScript backend for the Prosper HackSpain challenge. It adapts Prosper's
 Twilio Media Streams protocol to Azure OpenAI Realtime in Foundry by default, following
@@ -33,6 +139,9 @@ learned are maintained in [`AGENTS.md`](AGENTS.md).
 - OpenTelemetry call, Azure connection, response and tool spans, including
   token counts and audio byte counts. No audio, transcripts, tool arguments,
   patient identifiers or credentials are added to telemetry.
+- A separate, authenticated, read-only dashboard imported from `platform`.
+  It consumes existing observations without changing the voice runtime.
+  See [dashboard integration](#read-only-dashboard-integration).
 
 The `/ws` agent can send `/submit/*` actions for the actual `start.callSid`.
 These endpoints report what the agent would do; Prosper's underlying EHR is
@@ -64,7 +173,7 @@ npm --silent run prosper -- watch --run-id RUN_ID --json
 Only run the admission command when a person requests a scored call. No build,
 test, connection check or server startup invokes it. The API allows one queued
 or active run per team, across both lanes. The current scored lane has a global
-12-minute cooldown after the previous scored run finishes, not after admission
+5-minute cooldown after the previous scored run finishes, not after admission
 and not separately per problem; `--wait` observes it without repeated POSTs.
 Practice has its own 30-second cadence and is not started by this command.
 The scored run uses the registered integration; the CLI never overrides or
@@ -98,6 +207,63 @@ error, never silently treated as the requested scored call.
 single clinic request. Increasing a request timeout does not extend the call.
 Local API receipts and completed HTTP checks do not prove that a case passed.
 
+### Opt-in score coordinator
+
+The coordinator is separate from the voice server. It is not enabled by a
+build, commit, server startup or configuration check. Start it only with the
+team's explicit authorization to spend scored and practice calls:
+
+```sh
+# Read-only status; this is also the default when no command is supplied:
+npm run prosper:auto -- status
+
+# Keep this foreground command running in its own terminal:
+npm run prosper:auto -- run
+```
+
+It selects an open, scored problem below four credited passes, preferring the
+highest published weight and then problem number. It reads authoritative team
+credits and eligibility, waits for any existing run, checks local voice health,
+and observes the global five-minute scored / thirty-second practice cooldowns.
+The five-minute rule replaced the earlier twelve-minute setting during
+19 September. The registered endpoint, headers and voice model are never changed.
+Once all currently open problems are capped, it waits for new published problems.
+The public freeze flag or the published `2026-09-20T04:00:00Z` deadline stops
+further admissions; remote cancellation and team withdrawal also pause it.
+
+A failed or unresolved scored result queues every public case in that problem,
+one at a time. After the batch, the process **exits for review**, leaving
+`.local/score-automation/review.json` with run/call IDs, public case IDs and
+verdicts. It does not guess a private expected answer, patch code or deploy by
+itself. An assistant or operator must analyze the private local recordings,
+make only evidence-backed changes, and deploy only with no active calls/runs.
+If no local bug is established, preserve the voice agent and record that
+uncertainty. Explicit review approval resumes the same category if it still
+needs credits:
+
+```sh
+npm run prosper:auto -- resume --failure-run RUN_ID --revision COMMIT_SHA --outcome fix_deployed
+# Or, after an actual review found no justified local change:
+npm run prosper:auto -- resume --failure-run RUN_ID --revision COMMIT_SHA --outcome no_local_change
+```
+
+This tool additionally needs a legitimately authorized dashboard session in
+`.local/prosper-dashboard-session.json` (owned regular file, mode `0600`).
+It holds `origin`, `team_id`, `cookie` and `created_at`, **not a password**.
+Dashboard access supplies published case IDs, progress and eligibility, while
+the team API key admits runs. Both credentials must identify the same team.
+Expired authorization pauses operation; it never becomes zero credits or
+silently reauthenticates. Never commit or print the session file.
+
+Private atomic checkpoints, admission journals and a single-owner lease live
+under `.local/score-automation/`. Restarting `run` monitors a confirmed existing
+admission rather than repeating it. A POST with uncertain delivery remains
+blocked for explicit reconciliation against the remote run list. Never delete
+its journal just to unblock another POST. An existing lease is not stolen:
+verify the recorded process before recovering a genuinely stale lease.
+Ctrl+C stops the coordinator, **not** an already admitted remote run. A CLI
+background process remains attached to that CLI session; this is not a service.
+
 ## Booking safeguards
 
 The tool layer keeps state per call, separate from the language model:
@@ -105,6 +271,11 @@ The tool layer keeps state per call, separate from the language model:
 - `find_patient` requires a unique match on at least two supplied fields before
   allowing patient-specific operations. Full name plus DNI/NIE is sufficient.
   Stored national IDs, phone numbers and birth dates are not returned to the model.
+  A checksum-valid DNI/NIE mistakenly supplied in `phone` is looked up using
+  `national_id`, preserving its complete value rather than stripping the letter.
+  This does not create a second identity factor. Conflicting explicit IDs and
+  invalid check letters are rejected before lookup; ordinary phones and the
+  caller's name still retain their normal verification requirements.
 - `search_availability` searches from the day after the call in Europe/Madrid,
   paginating within the API's 14-day limit. `date_phrase` resolves the published
   English vocabulary and common Spanish/Catalan equivalents deterministically.
@@ -162,6 +333,20 @@ The tool layer keeps state per call, separate from the language model:
   Calendar-only refusals do not need an insurance detour or booking-style extra
   confirmation: after alternatives are declined or none remain, report the
   current request's `no_availability` before closing.
+  Privacy-only requests for stored identifiers, patient lists or another
+  person's appointment details use `out_of_scope`, not `caller_not_authorised`.
+  A conservative EN/ES/CA guard checks recent caller text before the first
+  submission, retains a disclosure request through identity-only follow-ups,
+  and rejects that wrong reason with explicit recovery guidance. It never
+  silently rewrites a payload or repairs an accepted action. Genuine
+  third-party scheduling keeps its normal verification and authorization
+  behavior; explicit new scheduling intent clears the older privacy context.
+  Do not keep requesting identifiers as a way to unlock a privacy-only request.
+  A caller leaving an available offer for another time is not `out_of_scope`
+  or `caller_not_authorised`. This includes polite EN/ES/CA endings after an
+  already accepted cancellation: keep the received `CANCEL`, rather than
+  appending a farewell `NO_ACTION`. Actual restrictions on a separate booking
+  still use the existing request-scoped evidence rules.
 
 ## Documented problem workflows
 
@@ -198,11 +383,43 @@ It currently resolves Madrid-province locations; unknown/ambiguous addresses
 require clarification. Candidate coordinates must come from validated geocoder
 responses, never model inference or a city-centre approximation.
 
+A fully matching street, portal, extension and municipality can resolve even
+when the provider also returns phonetic distractors. Only genuinely competing
+exact points need a choice; a different street or house number is never offered
+as a substitute. Generic street abbreviations and leading Spanish articles are
+normalized without erasing internal street-name words. Explicit five-digit
+postal codes, including separated `portal-postcode` and CP forms, are parsed
+as public address components and used with municipality filters. Available
+postcode metadata must agree; DNI, phone, private-unit and transcript-like
+inputs remain blocked before any external request.
+
+Each ambiguous candidate carries `selection_arguments` with the exact original
+public address and its call-local ID. Use that pair only after the caller selects
+the candidate; a corrected address starts a fresh lookup without `candidate_id`.
+Missing/stale candidates and edited address queries have distinct recovery
+guidance. Origin diagnostics contain only booleans/counts, never raw addresses.
+
 Public geography is cached and external requests are rate-limited. Timeouts,
 malformed data and service limits are explicit errors; a geocoding outage is
 not `no_availability`. The returned `origin_id` is local to the call and can be
 used as `nearest_origin_id` in availability. A closer site without eligible
 appointments is skipped; patient/provider/site/time/plan constraints still apply.
+CartoCiudad's portal bucket can still omit a house even when a larger mixed
+result limit is requested. If no validated exact point is available, the tool
+remains unresolved: it does not use a nearby portal, a street centroid or
+`find?q`'s first fuzzy match. Input-format rejection is reported separately from
+evidence that an address could not be found.
+If a nearest-site re-search invalidates a proposed BOOK, `booking_continuation`
+guides preparation of a fresh matching offer (with arguments only when the held
+policy is unambiguous). Answer location questions briefly and return to the
+current booking request. Automatic preparation remains opt-in; old proposal IDs
+and old consent cannot be reused, and reschedules/read-only searches do not
+become automatic bookings.
+Entrance, floor and turn-by-turn route details are not supplied by the current
+catalogue. Do not invent them or treat an access question as a new caller
+origin. Use the known street address, acknowledge missing details and return
+to the fresh offer without skipping consent. A necessary unresolved access
+condition must not be treated as agreement to book.
 
 Natural-language interpretation, noisy speech recognition and explicit consent
 remain model-dependent. Unsupported date or symptom wording must be clarified;
@@ -234,12 +451,21 @@ A key from `.env.lang` is not borrowed for a different overridden Azure endpoint
 Both files are ignored by Git. The existing AI Gateway key is left untouched
 and is not used.
 
+`.env.example` is a template with placeholders, not a backup of a working
+installation. Do not copy it over an existing `.env.local`. A private
+`.env.local.save` can hold a recovery copy (mode `0600`); neither that backup nor
+an editor's `env.local.save` is loaded by the app. The leading dot matters:
+edit `.env.local` for Prosper, WebSocket authentication and local overrides,
+and `.env.lang` for the inherited Azure settings. Never commit either file.
+
 Generate a private token for our WebSocket endpoint:
 
 ```sh
 npm run configure
 # If the Azure endpoint is not in either environment file:
 npm run configure -- --endpoint https://your-resource.openai.azure.com
+# Select a built-in Realtime voice without exposing other local settings:
+npm run configure -- --realtime-voice cedar
 ```
 
 Configuration preserves existing secrets, prints no values and sets environment
@@ -415,7 +641,9 @@ model, runtime instructions or concurrency limit during the ingress comparison.
 ## Private call records
 
 On the Linux VM, call transcripts/actions are recorded by default under
-`.local/calls/`, which is ignored by Git and never served over HTTP. Directories
+`.local/calls/`, which is ignored by Git and never served as files over HTTP. The
+authenticated dashboard can project a selected call's transcript as described
+below; raw NDJSON and WAV remain private. Directories
 use `0700` and files `0600`. Known credentials are redacted from the JSON records
 before serialization. Audio recording is a separate, explicit opt-in. This
 storage implementation uses Linux `/proc` for safe descriptor-based file access;
@@ -488,6 +716,254 @@ need manual review/removal. Disk/serialization errors are explicit; recordings
 are never silently truncated. The earlier read-only calls cannot be reconstructed
 retroactively; their recording/transcript remains in Prosper's dashboard.
 
+## Read-only dashboard integration
+
+The frontend from `platform` commit `b5cdcfa` lives in `dashboard/`. Its design,
+navigation, call list, relationship map and patient views use real data instead
+of the original demo generator. `src/dashboard/` is a separate HTTP adapter;
+`npm start`, the `/ws` protocol, model instructions and submission safeguards
+are unchanged. Future backend commits can be merged from `main` without moving
+the frontend into the voice implementation.
+
+Start the dashboard from the repository/worktree root:
+
+```sh
+# Once, unless a private dashboard token is already configured:
+mkdir -p .local
+node --input-type=module -e 'import { randomBytes } from "node:crypto"; import { writeFileSync } from "node:fs"; writeFileSync(".local/dashboard.env", "DASHBOARD_TOKEN=" + randomBytes(32).toString("hex") + "\n", { flag: "wx", mode: 0o600 });'
+
+npm run dashboard
+# http://127.0.0.1:4321
+```
+
+Enter `DASHBOARD_TOKEN` from the private file in the login form. It is a separate
+operator credential, not the voice endpoint token or an Azure/Prosper key.
+It remains in browser memory only; no URL, cookie, local storage or session
+storage contains it. Disconnecting clears patient data. API responses are
+`no-store`, same-origin and authenticated. The dashboard binds only to loopback;
+use an SSH forward such as `ssh -L 4321:127.0.0.1:4321 your-vm` for remote access.
+Do not expose an unauthenticated static file server at the repository root.
+
+`npm run dashboard` loads `.local/dashboard.env` if present, then the normal
+backend environment. In an isolated worktree, set `DASHBOARD_ENV_DIR` in that
+private file to the existing backend checkout to reuse its configuration
+read-only without copying credentials. Relative `DASHBOARD_RECORDS_DIR` is
+resolved against that checkout. The integration never restarts the agent,
+changes its tunnel/token, creates Azure resources, starts a Prosper call or
+submits a clinic action. Loading the dashboard does not invoke a model. The
+explicit browser voice demo and selected-call signal analysis below are the
+only opt-in inference features.
+
+| Source | Observations | Boundaries |
+| --- | --- | --- |
+| Local `/healthz` | Active call count, connector, deployment, recording and export status | Process health is not an inference success or a judge verdict. |
+| Private call records | Start/end, byte counts, interruption counts, technical events, received action verbs; selected-call transcript through its own authenticated endpoint | Bulk snapshots contain metadata only. No raw NDJSON, action bodies, tool details, file paths or WAV downloads. A recent unclosed record is not proof that the caller is speaking. |
+| Prosper `/clinic`, `/submissions` | Catalogue and the last 200 received records, correlated by `call_id` | A receipt is not a passing verdict. `/submit` does not update the EHR. |
+| Prosper `/directory`, upcoming appointments | Explicit name/phone search and a selected patient's appointments | No bulk directory dump. DNI/NIE, birth date, clinical notes and registration demographics are excluded from these structured responses. A BOOK `patient_id` can link calls; a name/phone similarity cannot establish identity or a family relationship. |
+| Azure Monitor | Supported token/audio-token usage, Realtime usage and gateway response metrics | Requires `AZURE_MONITOR_RESOURCE_ID` and the identity's metric-read permission. Scoped to the configured model deployment, not exclusively these calls. Missing samples are not zero. |
+| Foundry / Application Insights | Correlated `chat` response durations and token usage via Log Analytics | Requires `AZURE_MONITOR_WORKSPACE_ID`, a linked/exporting Application Insights resource and workspace query permission. Span duration is not caller-to-first-audio latency. Console-only traces cannot be recovered from Azure. |
+| Optional separate Speech resource | `AudioSecondsTranscribed`, `SynthesizedCharacters`, resource latency | The current agent does **not** use separate Azure Speech. An explicitly configured resource is labelled external, never attributed to voice calls. |
+
+Azure queries use `DefaultAzureCredential`, not the inference API key. Typical
+read-only roles are Monitoring Reader on the Cognitive Services resource and
+Log Analytics Reader on the workspace. Granting roles, creating/linking resources
+and enabling the agent's `APPLICATIONINSIGHTS_CONNECTION_STRING` are separate
+deployment operations, not dashboard side effects.
+
+The browser refreshes every five seconds. Metadata/health are cached for two
+seconds, Prosper receipts for fifteen, and Azure data for sixty; requests are
+coalesced rather than duplicated for each viewer. A source error stays visible
+and is never replaced with demo values. Historical statistics are explicitly a
+bounded observed sample (default seven days, up to 200 local files and 200
+receipts), not a complete population; period-over-period trends are not invented.
+The date ranges use Europe/Madrid calendar days.
+
+### Agent configuration
+
+In **Demo visual**, all four configuration tabs reproduce the original
+`platform` mockup's profile, prompt, traits, policies, actions and compliance
+examples. They are labelled fictional and read-only, never applied to Azure.
+In **Datos reales**, the prompt textbox shows the backend's actual instruction
+generator (`src/receptionist.ts`), with today's Madrid date as an example
+anchor. Each actual call has its own date and submission permission. Live,
+when explicitly selected, shows its voice and delegated backend instructions.
+This is not a Foundry readback or proof of an already-running session's prompt.
+
+### Browser voice demo
+
+The **Llamada fake** control is an isolated browser conversation, not a Prosper
+call. It uses the PC's microphone and the configured Azure voice model, so
+**Azure inference is real and billable**. Microphone permission and an explicit
+click are required; opening the page, looking at example data or issuing an
+unused connection ticket does not start inference.
+
+The authenticated, same-origin `POST /api/dashboard/demo-call` accepts no body.
+An empty chunked request from a reverse proxy is valid; an actual body is rejected.
+It returns a server-owned `demo-...` call ID, a one-use 30-second ticket, codec
+metadata and `/api/dashboard/demo-call/ws`. The WebSocket uses the
+`maio-demo` subprotocol plus that ticket; neither the dashboard token nor the
+voice endpoint token belongs in its URL. The ticket is bound to the browser's
+origin. One call/reservation is allowed at a time; the existing three-minute
+voice deadline and bounded audio queues still apply.
+
+The browser captures mono audio, resamples to 8 kHz and sends exact 160-byte
+G.711 mu-law frames. The server supplies the existing decoder's lookup table,
+so the browser does not need a separate codec service. Playback and microphone
+resources are stopped on hangup, disconnect or error. Use HTTPS or a loopback
+URL such as `http://127.0.0.1:4321`; ordinary HTTP on a remote VM IP is not a
+secure microphone context. Headphones help avoid acoustic feedback.
+
+The backend reuses the working voice bridge on an independent private loopback
+port and forces `allowSubmissions: false` for every demo. A second, GET-only
+Prosper transport rejects all submissions and run-management paths before any
+request can leave the process. The demo may read the real clinic catalogue and
+directory, but cannot book, cancel, move or register a patient. Do not replace
+this with a browser connection to the production `/ws` using a fabricated ID.
+
+Demo transcripts are projected and credential-redacted in memory, streamed only
+to the authenticated demo socket, and bounded to 500 entries / 256 KiB. No demo
+NDJSON/WAV is added to real call history or scoring; no extra model analyzes
+the text. Azure's resource-level usage metrics do include the actual inference.
+`clear` is opt-in on this private bridge and is sent in the same ordered stream
+as its media frames; the production Prosper transport remains unchanged.
+
+Real clinical data, explicit illustrative presentation data and the real Azure
+voice demo are separate concepts. An example chart is not measured call quality,
+a demo conversation is not a judge verdict, and no illustrative UI action
+modifies the real agent or clinic.
+
+### Person map
+
+The map groups calls only through patient IDs already present in received
+records, never by a similar name or telephone. Unlinked calls remain in the
+call list rather than becoming invented people. It shows at most twelve
+people per page, labelled by their resolved name or an explicit patient alias.
+Stable radial slots surround the central maio logo at deliberately varied
+distances, so the people remain dispersed rather than forming a crowded ring.
+Paging discloses the total; the same state/date filters remain.
+
+Hover, keyboard focus or click opens the person card. It includes available
+profile information, actual call IDs/times/durations/results, and a targeted
+read of that patient's upcoming EHR appointments. The last reported BOOK is
+labelled separately from the read-only EHR agenda. A name not already resolved
+through an explicit patient lookup is shown as an alias, not guessed from a
+transcript; unavailable real profile fields remain explicit.
+
+Demo portraits are locally served, CC0-labelled Pravatar placeholders documented
+under `dashboard/design/portraits/LICENSE.txt`. They are illustrative, **not
+photos of the represented patients**. Real profiles without an actual photo use
+Phosphor's Finn the Human icon instead. No names, IDs or phone numbers are sent
+to an avatar service. Demo-visual profiles and appointments remain simulated.
+
+### Selected-call transcripts
+
+At the user's explicit request for these synthetic challenge conversations,
+`GET /api/dashboard/calls/{callId}/transcript` now returns a bounded text
+projection behind the **same independent dashboard token**, same-origin checks
+and `no-store` policy. This replaces the former transcript-hidden UI decision,
+not the authentication or raw-recording privacy boundary.
+
+The JSON shape is `{ callId, checkedAt, historyDays, entries, limited, limits }`.
+Each entry contains only `speaker` (`user` or `assistant`), `text`, `timestamp`
+and `itemId`, plus recorded `partial`, `startMs` and `endMs` when present.
+`limits` is `{ entries: 500, bytes: 262144 }`: the newest 500 events at most,
+within 256 KiB of projected UTF-8 JSON entries. `limited: true` explicitly warns
+that older fragments were omitted. The latest matching record must be among
+the same 200 recent local files and configured history window as the snapshot
+(default seven days, maximum thirty). Source files remain capped at 8 MiB and
+complete event lines at 64 KiB; unfinished appended lines are not invented.
+
+No transcript is added to `/api/dashboard/snapshot` or fetched for every call.
+Viewing a transcript alone does not send it to a model; the separately
+requested signal-analysis feature below has its own bounded/redacted input.
+Known configured credentials are
+redacted again when projecting text and item IDs; existing redaction stays in
+place. Synthetic patient statements, including identifiers spoken in them, may
+appear in this explicitly authorized transcript view. Structured directory,
+receipt and tool fields remain excluded as before.
+
+The selected call refreshes with the existing five-second cycle. Selection
+changes, hiding the detail in the map, navigation and disconnect abort pending
+requests; late responses cannot replace another selection or session. Rendering
+uses DOM text nodes, not HTML. Whitespace, repeated words and partial fragments
+are preserved, not merged into invented turns. Speakers are labelled as the
+interlocutor and agent; partial text may be incomplete/interrupted, and **agent
+text is generated, not verified as heard**. Event timestamps are not exact
+acoustic timings; optional model intervals do not prove playback either.
+
+The UI distinguishes loading, an empty transcript, an unavailable local record
+and source errors. The API returns `401` without a valid token, `400` for an
+invalid call ID/query, `404` when no local record is in the bounded sample, and
+`503` for unsafe/unreadable/invalid source records. A Prosper receipt without a
+local record does not supply any conversation text.
+
+The shared metadata/transcript reader requires owner-controlled, regular, unlinked files and
+rejects symlinks. It never changes the voice process's source permissions.
+Additional permission/ACL bits (including those installed by a shared workspace)
+are surfaced as a warning, not mistaken for corrupt data. Review such access
+locally; the writer's private `0700`/`0600` policy is unchanged.
+
+Emotion, calibrated intent confidence, MOS, jitter, packet loss, ASR accuracy,
+NPS, clinical risk and cost remain **unmeasured**, not zero. Explicit visual examples do not
+turn them into real telemetry. Prompt edits, outbound telephone calls, SMS,
+patient creation and historical WAV playback do not gain clinic write
+implementations. Configuration remains read-only; the browser voice demo is
+the separate, opt-in feature described above.
+See [`dashboard/README.md`](dashboard/README.md) for frontend ownership.
+
+### Real-mode textual signals
+
+At the user's explicit request, opening **Señales** for a selected real call
+can request `POST /api/dashboard/calls/{callId}/signals`. The endpoint requires
+the independent dashboard token, same origin and an empty body; it never accepts
+a client-supplied transcript or model instructions. GET does not trigger
+inference. No analysis runs when the page loads, in visual-demo mode, or for
+every row in the call list.
+
+`DASHBOARD_SIGNALS_ENABLED=true` enables this feature.
+`DASHBOARD_SIGNALS_DEPLOYMENT` defaults to the already deployed `gpt-5.4-mini`
+on the same Azure OpenAI resource; it does not change the voice model. Requests
+use the Responses API, no tools, `store:false`, a 20-second deadline and at most
+2,500 output tokens. This is separate **paid text inference**, not an Azure
+Monitor measurement or a clinic write.
+
+The service uses at most 60 recent transcript entries and 12,000 characters,
+with at most 1,600 characters per entry. Configured credentials and recognizable
+direct identifiers, URLs and name sequences are filtered before inference.
+This reduces identifying data; it is not a guarantee of complete anonymization.
+The authorized input can still describe the conversation's clinical topic.
+No audio, chart notes, demographics or raw tool arguments are added. Coverage
+and truncation are explicit.
+
+The response contains a perceived text tone, nullable calmness/satisfaction/
+confusion indicators, qualitative intent confidence, conversation-pattern
+tags and redacted evidence excerpts. All non-null indicators, intents and
+patterns must cite supplied caller-entry IDs; invented or assistant-only
+evidence is rejected. Outputs are strictly schema-validated and contain no
+free-form medical advice. Transcript text is untrusted data, not instructions.
+
+These are **textual estimates**, not actual emotional measurements, acoustic
+quality, diagnoses, calibrated probabilities, booking authorization or judge
+verdicts. Null means insufficient evidence, never zero. Assistant text is only
+context: generated text and an accepted API receipt cannot establish what the
+caller heard or whether they were satisfied.
+
+Identical redacted input reuses an in-memory cached result. Changed input is
+analyzed no more than once per 30 seconds per call; an older result is explicitly
+marked stale during that interval. Concurrent viewers share the same request,
+only one model analysis runs at a time, and the cache is capped at 128 calls.
+Failures are explicit and are not retried by polling during the cooldown.
+Closing a panel aborts its browser wait; an already issued bounded shared model
+request may finish and populate the cache. No result is fed back into the
+receptionist or used to submit actions. Browser demo conversations are ephemeral
+and do not create the local real-call records this endpoint requires.
+
+Authoritative metric and query contracts:
+
+- [Cognitive Services / OpenAI / Speech metrics](https://learn.microsoft.com/en-us/azure/azure-monitor/reference/supported-metrics/microsoft-cognitiveservices-accounts-metrics)
+- [Azure Monitor Metrics REST API](https://learn.microsoft.com/en-us/rest/api/monitor/metrics/list?view=rest-monitor-2023-10-01)
+- [Log Analytics query API](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/api/request-format)
+
 ## Observability
 
 Set `APPLICATIONINSIGHTS_CONNECTION_STRING` to export explicit spans and
@@ -527,6 +1003,8 @@ SDK debug or transcript logging when using patient information.
 npm run typecheck
 npm test
 npm run build
+npx playwright install chromium  # Once, for the dashboard browser checks only
+npm run test:dashboard           # Synthetic sources; no Azure/Prosper requests
 npm run check:connections
 # Invokes the model and incurs Azure usage:
 npm run check:connections -- --voice

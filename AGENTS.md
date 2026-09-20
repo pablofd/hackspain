@@ -34,6 +34,7 @@ code. Use synthetic fixtures and normal API lookups instead.
 | `src/azure-live.ts`, `src/live-transcript.ts` | Isolated experimental GPT-Live connection, Responses delegation and conservative fragment-based confirmation guards. |
 | `src/voice-provider.ts` | Explicit connector selection and independent model/gain profiles; no automatic fallback. |
 | `src/prosper-runs.ts`, `scripts/prosper-runs.ts` | Explicit problem-specific scored admission, read-only console monitoring and sanitized private run snapshots. |
+| `src/prosper-dashboard.ts`, `src/score-automation*.ts`, `scripts/prosper-auto.ts` | Opt-in score selection, protected dashboard reads, persistent single-owner admission and public diagnostic batches with an explicit review barrier. |
 | `src/receptionist.ts` | Runtime instructions, tool schemas, verified patients, slots, proposals, confirmations and outcomes. |
 | `src/prosper.ts`, `src/prosper-types.ts` | Authenticated clinic/submission requests, runtime schemas, receipts and normalization. |
 | `src/scheduling.ts` | Deterministic Madrid date phrases, date windows, age, closures and site openings. |
@@ -44,6 +45,7 @@ code. Use synthetic fixtures and normal API lookups instead.
 | `src/server.ts`, `src/protocol.ts`, `src/audio.ts` | Authenticated `/ws`, authoritative call ID, isolated sessions, bounded queues and interruption playback. |
 | `src/config.ts`, `.env.example` | Configuration without exposing secret values. |
 | `src/call-records.ts`, `src/call-audio.ts`, `src/telemetry.ts` | Private local transcripts/optional WAV recordings versus sanitized operational telemetry. |
+| `src/dashboard/`, `scripts/dashboard.ts`, `dashboard/` | Independent authenticated clinic-read-only adapter, platform UI and opt-in isolated browser voice demo; no production call or submission changes. |
 | `test/` | Offline Node tests with synthetic patients and fake upstream responses. |
 
 - Keep TypeScript strict; use Zod for untrusted tool arguments and API responses.
@@ -70,12 +72,35 @@ code. Use synthetic fixtures and normal API lookups instead.
   `npm run prosper:score -- --problem ID` requests one private scored call;
   the old Run All batch command is no longer supported. Read-only
   `npm run prosper -- list|status|watch` never admits a run. Honor the single
-  queued/active team slot and global 12-minute scored cooldown after completion.
+  queued/active team slot and global 5-minute scored cooldown after completion.
   A lost admission response is uncertain: inspect the run list, never
   automatically repeat the POST. Stopping a watcher does not cancel its run.
+- `npm run prosper:auto -- run` is separately opt-in and admits real calls.
+  Its dashboard session must remain private (`0600`) and match the API key's team.
+  On a scored failure, finish the whole public category before reviewing the
+  local evidence. The coordinator exits at `review_required`; it does not
+  autonomously modify or deploy the voice agent. Resume only with the matching
+  failure ID and an explicit reviewed/deployed revision, or a justified
+  `no_local_change` decision. Preserve uncertain admission journals and do not
+  steal another coordinator's lease or adopt/cancel external runs.
 - Before restarting the active server, check `/healthz` and wait for calls to
   finish. Building `dist/` does not reload an already-running `npm start`.
   Preserve the tunnel and token; do not reset unrelated VM processes.
+- Browser voice demos must use the independent authenticated dashboard bridge,
+  server-generated `demo-...` IDs, `allowSubmissions: false` and its GET-only
+  Prosper transport. Never expose the production voice token or forward a
+  browser-controlled `start`/call ID to the production `/ws`. Tickets are
+  short-lived, one-use and origin-bound; one demo at a time and three minutes
+  maximum. No model runs on page load and no demo enters real records/scoring.
+  Ordered `clear` is opt-in for browser playback; keep production defaults.
+  Distinguish real observations, explicitly illustrative UI data and paid
+  Azure voice. Do not hide a live source error behind unlabelled sample data.
+- Dashboard configuration examples belong only to Demo visual. Real prompt
+  display uses the runtime instruction generator, not a Foundry readback.
+  Vercel serves public assets and proxies authenticated HTTP; audio connects
+  directly to the persistent adapter over WSS. An optional exact HTTPS
+  `DASHBOARD_PUBLIC_ORIGIN` authorizes that frontend without wildcard origins,
+  forwarded-header trust, reusable tickets or browser access to backend secrets.
 - Update **Error history and lessons learned** below for each investigated
   failure. Record evidence, cause, correction, regression and remaining limits.
   Distinguish a local fix, an accepted API receipt and a passing judge verdict.
@@ -134,7 +159,9 @@ run results; do not recompute or mislabel them as the current scoring rule.
   problem. A new failure cannot remove already banked points.
   Public practice never scores. Public answers move with the day's date anchor.
 - Problems open progressively; one scored run targets one open scored problem.
-  Scored cooldown is 12 minutes after completion and global across problems.
+  Scored cooldown is 5 minutes after completion and global across problems;
+  this replaced the earlier 12-minute value during 19 September. Practice has
+  a separate 30-second cooldown, but both lanes share one active team slot.
   The supplied snapshot had problems 1-6 open (2 remains unscored).
 - Maximum three minutes per call. Slow connection or no audible agent audio
   can end it sooner. Streaming silence is not an answer. Do not raise the
@@ -429,7 +456,24 @@ Escalate rather than schedule these.
   secrets or add raw patient transcripts to this file, fixtures or public issues.
 - Local NDJSON records may contain patient data. They are private Linux files
   with protected paths, mode 0600, secret redaction and conservative retention.
-  They are not served by HTTP or exported as telemetry.
+  Raw files are not served by HTTP or exported as telemetry. At the user's
+  explicit request (19 Sep), the independently authenticated dashboard may
+  project a selected synthetic challenge call's transcript: speaker, text,
+  event timestamp, item ID and recorded partial/model timing fields only.
+  Keep it out of bulk snapshots; bound it to the recent 200-file/history window,
+  500 entries and 256 KiB of projected entries. Preserve credential redaction,
+  same-origin/no-store controls and text-node rendering. NDJSON/WAV downloads,
+  raw paths/tool bodies and unapproved third-party transcript analysis remain prohibited.
+  Cancel pending reads on selection changes/disposal/disconnect and reject
+  stale responses; display missing records and source errors without synthesis.
+- At the user's subsequent explicit request, real-mode selected-call signals
+  may use bounded, identifier-filtered text with the existing Azure resource.
+  Keep this separate from the voice path: on-demand authenticated POST only,
+  no tools/clinical writes, no background history sweep, finite input/output/
+  deadline/cache/concurrency limits, and no automatic paid retry loop.
+  Strictly validate caller evidence references; label scores as textual
+  estimates and unknowns as null. Never claim measured emotions, calibrated
+  confidence, audio quality, medical judgments or judge outcomes.
 - Audio recording is separately opt-in via `CALL_AUDIO_RECORDING_ENABLED`.
   Companion WAV files preserve caller input and actually sent agent output on
   separate channels; they cannot redact spoken secrets. Keep them local/private,
@@ -458,6 +502,17 @@ problems or promote a synthetic evaluation to a Prosper judge result.
 
 | Problem/type | Observed failure and cause | Correction / regression / status |
 | --- | --- | --- |
+| Browser demo / proxy body framing (19 Sep) | Local admission passed, but the HTTPS preview returned dashboard_invalid_demo_request: the initial check rejected transfer-encoded requests even when their body was empty. | Validate the actual empty request body while still rejecting nonempty content, rather than rejecting a valid proxy framing mode. Empty/nonempty chunked regressions retain authentication, origin and no-inference-before-WebSocket checks. No production voice or clinic-write change. |
+| Browser demo / repeated WebSocket upgrade (offline, 19 Sep) | Admission/reconnect tests exposed an upgrade listener accidentally registered once per HTTP request. A later connection received a second HTTP 401 after its 101 upgrade, causing an invalid WebSocket frame. No production or Azure call was used for this reproducer. | Register upgrade handling once per server. Tests cover repeated/replayed/expired tickets, concurrent admission, origin checks, forged IDs, audio bounds, ordered clear and cleanup. A separate short synthetic Azure greeting loopback then produced both generated voice and recognized input with zero clinic writes, zero real call records and no Prosper run. This is demo transport evidence, not a judge verdict. |
+| Dashboard / requested transcript display (19 Sep) | The metadata-only dashboard intentionally showed a private-transcript placeholder, preventing the user's explicitly requested inspection of synthetic challenge conversations. This was a UI policy choice, not a voice or Prosper failure. | Added a separate authenticated, bounded selected-call transcript projection and safe text view, with credential redaction, partial/generated-text caveats, live refresh and stale-response cancellation. Synthetic API/browser regressions cover auth, unsafe/malformed sources, bounds, XSS text, updates and selection/session races; snapshots remain metadata-only and raw NDJSON/WAV stay private. No inference, submitted action, server restart or judge verdict is involved. |
+| Dashboard metadata / inherited ACLs (19 Sep) | A first read rejected the existing owner-controlled records because the shared workspace adds named ACLs and expands permission-mask bits. The untouched backend's two exact-mode fixtures also fail under that inherited ACL, not because of the integration. | Read only a bounded whitelisted projection, retain owner/no-follow/link checks, surface additional source permissions and never chmod the voice process's files. Synthetic ACL coverage and real metadata reads succeed; the existing 28 recording regressions pass in an isolated fixture directory without inherited ACLs. No recording writer or voice behavior changed. |
+| Dashboard integration / simulated observability (19 Sep) | The uploaded platform generated patients, sentiment, response timings, MOS and ASR scores, and offered controls with no backend implementation. Treating these as telemetry would misrepresent actual calls; a name-based map could also join unrelated patients. | Replaced demo imports with a separately authenticated read-only adapter, exact BOOK patient-ID links, source/error states and explicit unavailable metrics. Raw NDJSON/WAV and structured registration demographics remain private; selected transcript display was subsequently authorized as documented above. No new model inference or clinic writes. Offline projection/authentication/Monitor and synthetic browser coverage; a read-only Azure query returned real audio/token usage, while missing latency samples remain unavailable. No agent change or judge result is claimed. |
+| `nearest_site` / exact address and postcode handling (private run, 19 Sep 20:36 UTC) | The updated flow passed two of four cases. Both remaining failures reached 180 seconds before consent/submission: one was offered different portal numbers and later rejected a postcode-bearing address; another was made to choose from fuzzy results despite an exact address being present. No provider failure was recorded in these two; passing calls also carried connection_lost. | Resolve only a unique fully matching address from validated point metadata, filter wrong-street/number distractors, preserve genuine ambiguity and normalize public postcode/municipality fields without weakening identifier/privacy guards. Synthetic regressions cover postal separators, metadata conflicts, bounds/cancellation and negative identities; controlled public-address reads resolve exact points without patient identifiers. No nearby-house/centroid substitution or unverified Find fallback; absent exact upstream coverage remains a limit. New judge validation is pending. |
+| Identification / identifier field confusion (nearest-site follow-up, 19 Sep) | A failed call spent an extra exchange correcting the agent's claim that a supplied DNI was an incomplete phone. The old tool arguments are unavailable, but a synthetic reproduction confirms that a complete DNI in the phone field loses the usable lookup and is not verified. | Only checksum-valid DNI/NIE-shaped phone values are retyped as national_id without changing their value. Conflicting explicit IDs and bad letters fail before network; a repeated ID never becomes two factors, and normal phone/name verification remains. Correction diagnostics are value-free. Synthetic regressions pass; no private-case identity or guessed value is embedded. |
+| `the_questions` / correct facts, no subsequent action (private run, 19 Sep 19:31 UTC) | One of four cases ended with missing_record. The caller asked which site opens Saturday; both successful catalogue reads and the generated answer identify the correct site/hours. The emitted agent channel contains the complete answer before the caller interrupts; an independent ASR check of only this public-facts audio corroborates it. The caller nevertheless abandoned without identity, a booking request or consent. No submission was attempted or failed. | No local factual defect is demonstrated, and remote hearing/private caller criteria remain unknown. Do not invent a default NO_ACTION or a booking to manufacture a record. Preserve the evidence and reproduce with a public case before attributing a platform/recognition fault. No patient audio or identifiers were sent in the isolated, write-disabled audio audit. |
+| `nearest_site` / unfinished location-to-booking flow (private runs, 19 Sep 19:10 and 19:47 UTC) | The first four calls reached the three-minute limit with speech and a proposed BOOK but no confirmation/submission. One re-search invalidated its old offer without preparing a replacement; others stalled on address clarification or rejected candidate selections. Three later calls repeated those loops; a fourth independently failed with Azure output_timeout at 41 seconds. No geocoder transport error was recorded, and old logs lack exact failed arguments. | Candidates now return exact selection_arguments; edited query and missing/stale ID errors have distinct recovery guidance without relaxed binding. A nearest re-search invalidating an unconfirmed BOOK returns conditional fresh-offer guidance, never submission or consent reuse. Origin diagnostics are booleans/counts only. The catalogue has no entrances/floors/routes: do not invent them or re-geocode access questions. Synthetic regressions preserve read-only/reschedule behavior, held-policy choice and stale-offer rejection. The separate provider timeout is not fixed by this workflow change; new public validation remains required. |
+| `wild_card` / extra refusal after cancellation (private run, 19 Sep 17:01 UTC) | The run passed three of four cases. The failed call explicitly confirmed an upcoming CANCEL, then asked about availability, declined the offered slot and deferred booking. The agent appended NO_ACTION(out_of_scope) to the accepted cancellation. Its availability lookup had slots; the courteous deferral was not an unsupported request. The private expected record remains withheld. | Extended the existing voluntary-deferral guard for common EN/ES/CA closings and clarified that an availability follow-up/declined offer must not create a farewell action after CANCEL. A synthetic regression first reproduced CANCEL plus the extra NO_ACTION, then requires exactly one cancel POST. Genuine separate unbookable intents retain request-scoped evidence rules; no call/patient/provider/slot IDs are hardcoded. Offline validation, not a new judge pass. |
+| `adversarial` / privacy refusal reason (private runs, 19 Sep 16:06 and 16:38 UTC) | The first run had one record_mismatch and the second had two. All three failures accepted NO_ACTION(caller_not_authorised) for requests about another person's appointments/doctor or stored identifiers, without a scheduling operation. No clinic-read tool ran. One conversation also repeated identifier requests until the three-minute cap; its transport attribution remains inconclusive. | Shared prompt/reason-schema guidance and a conservative EN/ES/CA pre-submit guard distinguish privacy-only out_of_scope from genuine scheduling authorization failures. Recent disclosure context survives name/missing-ID follow-ups; new legitimate scheduling and accepted-action retries retain their behavior. Synthetic regressions reproduce the wrong POST and check the exact corrected payload; local transcript-window replay blocks all three observed wrong submissions without network writes. No private expected answer was accessed, no patient values were hardcoded, and a new public judge verdict is still required. |
 | `no_slot_free` / approved alternative constraints (offline, 19 Sep) | A synthetic reproducer showed that combining relax_constraints with an explicit replacement erased the NEW doctor/site/date/time/weekday/language, widening the search instead of honoring the agreed alternative. The historical private failures cannot be attributed to this exact argument combination without their missing raw arguments. | Explicit replacements now survive relaxation; omission still removes the old constraint. Pure calendar gaps expose a permission-gated broader-window query and concise current-evidence no_availability guidance, without changing coverage/closure handling or anchored rescheduling. Regressions cover exact payloads, retained filters, fresh consent and stale-refusal rejection. No real call or judge result claimed. |
 | `no_slot_free` / later-move closure (33/36 legacy run, 19 Sep) | Three final failures had no action receipt: two BOOK negotiation paths and one RESCHEDULE path. A direct agreement arrived around 175 s without confirm_action before the cap; another final offer arrived too late for a reply. The move used an invented request ID and unsupported relative dates, then re-asked known site information after a correction. Tool paths do not establish a private problem label or hidden expected answer. | Narrow change only: concise revised offers, confirmation dispatch before additional chatter, and opt-in later_search anchored to a verified upcoming appointment. Synthetic regressions preserve caller constraints, new consent after corrections, refusal evidence, normal BOOK, one/two cancellations with one grouped approval, and no new writes on hang-up. No model, audio, global confirmation/registration rules or 60s/28s limits changed. Validation is offline; no new judged or acoustic result is claimed. |
 | Realtime 2.1 / call budget (local cohort, 19 Sep 09:42-10:21 UTC) | Of 23 recorded calls, 12 reached the local 180-second limit; five of those already had an API receipt. All 23 had incoming and outgoing signal, and every time-limited call had audio activity near the deadline. Five registration calls yielded two receipts at 179.9/183.5 seconds and three without a final receipt. | Dialogue/WAV/trace review completed privately; no judge mapping or model-controlled comparison is available. Propose shorter registration/correction readbacks and a remaining-time budget without skipping consent or extending the call. No runtime fix deployed by this review. A confirmed POST finishing in the post-close grace window is not itself invalid. |

@@ -62,6 +62,22 @@ test("scored admission sends only the selected problem and scored lane", async (
   assert.equal(requests, 1);
 });
 
+test("practice admission selects one explicit public case and never overrides integration", async () => {
+  let requests = 0;
+  const client = new ProsperRunsClient(settings, async (input, init) => {
+    requests += 1;
+    assert.equal(String(input), "https://prosper.example/api/v1/runs");
+    assert.equal(init?.method, "POST");
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      lane: "practice", problem_id: "no_slot_free", case_id: "public-synthetic",
+    });
+    return Response.json({ id: "practice-test" }, { status: 202 });
+  });
+  assert.deepEqual(await client.startPractice("no_slot_free", "public-synthetic", signal()), { id: "practice-test" });
+  await assert.rejects(client.startPractice("no_slot_free", "../other", signal()), { code: "invalid_case_id" });
+  assert.equal(requests, 1);
+});
+
 test("uncertain admission never retries POST or claims no run was created", async () => {
   for (const request of [
     async () => { throw new Error("private upstream data"); },
@@ -143,9 +159,9 @@ test("official PASS takes precedence over wall-clock and other failure signals",
 
 test("one active run in either lane blocks admission and scored cooldown starts at finish", () => {
   const run = runSchema.parse(completed);
-  const before = Date.parse("2026-09-19T10:31:59Z");
+  const before = Date.parse("2026-09-19T10:24:59Z");
   assert.equal(scoredRunEligibility([run], before).ready, false);
-  assert.equal(scoredRunEligibility([run], before).eligibleAt, Date.parse("2026-09-19T10:32:00Z"));
+  assert.equal(scoredRunEligibility([run], before).eligibleAt, Date.parse("2026-09-19T10:25:00Z"));
   assert.equal(scoredRunEligibility([run], before + 1000).ready, true);
   const practice = { ...run, id: "practice", mode: "practice" as const, status: "running" as const, finished_at: null };
   assert.equal(scoredRunEligibility([practice, run], before + 2000).active?.id, "practice");
