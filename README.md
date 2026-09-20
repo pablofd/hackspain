@@ -1,4 +1,9 @@
-**Acceso al dashboard:** https://espionage-transport-prevalent.ngrok-free.dev/ luego visit site luego token: 2a6eead52574239315c8f8c9dd2747f99f8a1dffe7e8ea4686e31ed52d81c225
+** VIDEO: **  https://youtu.be/6RbtG0iDtu0
+
+**Acceso al dashboard:** 
+https://espionage-transport-prevalent.ngrok-free.dev/ 
+Luego Click en visit site 
+Introducir token: 2a6eead52574239315c8f8c9dd2747f99f8a1dffe7e8ea4686e31ed52d81c225
 
 # Cachopo - Foundry voice receptionist
 
