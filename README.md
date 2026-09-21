@@ -1,10 +1,5 @@
 ## Accede al vídeo-demo: https://youtu.be/6RbtG0iDtu0
 
-## Paso a paso para acceder al dashboard:
-1. **Accede al link:** https://espionage-transport-prevalent.ngrok-free.dev/
-2. Haz click en "Visit site"
-3. Introduce el token: `2a6eead52574239315c8f8c9dd2747f99f8a1dffe7e8ea4686e31ed52d81c225`
-
 # Cachopo - Foundry voice receptionist
 
 ## Evaluar el dashboard y el agente juntos
